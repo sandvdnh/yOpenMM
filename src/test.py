@@ -1,9 +1,13 @@
 import yaff
 import molmod
 
+import simtk.unit as unit
+import simtk.openmm as mm
+import simtk.openmm.app
+
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system
-from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators
+from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators, apply_generators_mm
 from systems.systems import test_systems
 
 
@@ -60,11 +64,11 @@ class Test(object):
             self.rcut = 0.99 * max_rcut
 
     def report(self):
-        print('#### {} ####'.format(self.name.upper()))
-        print('{} supercell; {} atoms'.format(self.supercell, self.system.natom))
-        print(self.system.cell._get_rvecs() / molmod.units.angstrom)
-        for prefix, _ in self.parameters.sections.items():
-            print(prefix)
+        print('{}; {} supercell; {} atoms'.format(self.name.upper(), self.supercell, self.system.natom))
+        print('')
+        print('CUTOFF: {:.5f} angstrom'.format(self.rcut / molmod.units.angstrom))
+        print(self.system.cell._get_rvecs() / molmod.units.angstrom, 'angstrom')
+        print('')
         pass
 
     def _internal_test(self):
@@ -80,7 +84,8 @@ class SinglePoint(Test):
     """Compares energy and forces for a single state"""
     tname = 'single'
 
-    def _internal_test(self):
+    def _section_test(self, prefix, section):
+        parameters = yaff.pes.parameters.Parameters({prefix: section})
         mm_system = _init_openmm_system(self.system)
         ff_args = FFArgs(
                 rcut=self.rcut,
@@ -88,7 +93,7 @@ class SinglePoint(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 )
-        apply_generators(self.system, self.parameters, ff_args)
+        apply_generators(self.system, parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
         e = ff.compute() / molmod.units.kjmol
         ff_args_ = yaff.pes.generator.FFArgs(
@@ -97,17 +102,44 @@ class SinglePoint(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 )
-        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
+        yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
         e_ = ff.compute() / molmod.units.kjmol
         assert(e == e_)
+        # OPENMM
+        mm_system = _init_openmm_system(self.system)
+        ff_args = FFArgs(
+                rcut=self.rcut,
+                tr=self.tr,
+                alpha_scale=self.alpha_scale,
+                gcut_scale=self.gcut_scale,
+                )
+        apply_generators_mm(self.system, parameters, ff_args, mm_system)
+        integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
+        platform = mm.Platform.getPlatformByName(self.platform)
+        context = mm.Context(mm_system, integrator, platform)
+        if platform.getName() == 'CUDA':
+            platform.setPropertyValue(context, "CudaPrecision", 'mixed')
+        context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
+        state = context.getState(
+                getPositions=True,
+                getForces=True,
+                getEnergy=True,
+                )
+        mm_e = state.getPotentialEnergy()
+        return e, mm_e
+
+    def _internal_test(self):
+        print(' ' * 11 + '\t{:20}'.format('(YAFF)') + '\t{:20}'.format('(OpenMM)'))
+        for prefix, section in self.parameters.sections.items():
+            e, mm_e = self._section_test(prefix, section)
+            print('{:10}\t{:20}\t{:20}'.format(prefix, str(e), str(mm_e)[:-6]))
         return e
 
 
 class VerletTest(Test):
     """Compares energy and forces over a short trajectory obtained through Verlet integration"""
     tname = 'verlet'
-    pass
 
 
 def get_test(args):
