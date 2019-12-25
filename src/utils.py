@@ -36,8 +36,8 @@ def _align(system):
     rvecs_final = np.multiply(rvecs_new_new, (np.abs(rvecs_new_new) > tol))
     system.cell = Cell(rvecs_final)
     system.pos[:] = pos_new_new
-    print('ALIGNED CELL TENSOR (in angstrom):')
-    print(rvecs_final / molmod.units.angstrom)
+    #print('ALIGNED CELL TENSOR (in angstrom):')
+    #print(rvecs_final / molmod.units.angstrom)
 
 def _init_openmm_system(system):
     """Creates and returns an OpenMM system object with correct cell vectors and particles"""
@@ -74,5 +74,5 @@ def get_topology(system):
     return top
 
 def _check_rvecs(rvecs):
-    max_rcut = 0
-    return max_rcut
+    lengths = np.linalg.norm(rvecs, axis=1)
+    return np.min(lengths) / 2

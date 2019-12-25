@@ -9,7 +9,7 @@ yaff.log.set_level(yaff.log.silent)
 
 def main(args):
     test = get_test(args)
-    test.pre()
+    test()
 
 
 if __name__ == '__main__':
@@ -20,7 +20,7 @@ if __name__ == '__main__':
             name of the test system (must be defined in ./systems/systems.py)
         test: (string)
             type of test
-                'single_point': validates the entire potential energy and forces
+                'single': validates the entire potential energy and forces
                 'verlet'      : performs a short (200 steps) verlet integration run and
                                 compares energy and forces over entire trajectory
         platform: (string)

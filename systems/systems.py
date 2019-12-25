@@ -1,4 +1,5 @@
 import os
+import molmod
 
 """
 supercell: the super cell to use for the validation
@@ -27,8 +28,8 @@ def _create_dict(**kwargs):
 
 ## MIL53 ##
 info = _create_dict(
-        supercell=[3, 4, 6],
-        rcut=12,
+        supercell=[2, 2, 2],
+        rcut=6 * molmod.units.angstrom,
         tr=None,
         name='mil53',
         path_pars=os.path.join(PATH, 'mil53', 'pars.txt'),
@@ -40,7 +41,7 @@ test_systems.append(dict(info))
 ## COF5 ##
 info = _create_dict(
         supercell=[2, 1, 4],
-        rcut=10,
+        rcut=10 * molmod.units.angstrom,
         tr=None,
         name='cof5',
         path_pars=os.path.join(PATH, 'cof5', 'pars.txt'),
