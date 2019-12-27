@@ -28,8 +28,8 @@ def _create_dict(**kwargs):
 
 ## MIL53 ##
 info = _create_dict(
-        supercell=[2, 2, 2],
-        rcut=6 * molmod.units.angstrom,
+        supercell=[2, 2, 4],
+        rcut=12 * molmod.units.angstrom,
         tr=None,
         name='mil53',
         path_pars=os.path.join(PATH, 'mil53', 'pars.txt'),

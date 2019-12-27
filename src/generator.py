@@ -1214,14 +1214,24 @@ class MM3Generator(NonbondedGenerator):
         force.setNonbondedMethod(2)
 
         # COMPENSATE FOR EXCLUSIONS
+        scale_index = 0
+        for key, value in scale_table.items():
+            assert(value == 0.0 or value == 1.0)
+            if value == 0.0:
+                scale_index += 1
+
         exclusion_force = self.get_exclusion_force(energy)
         for i in range(system.natom):
-            for j in system.neighs1[i]:
-                if i < j:
-                    self.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
-            for j in system.neighs2[i]:
-                if i < j:
-                    self.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
+            if scale_index > 0:
+                for j in system.neighs1[i]:
+                    if i < j:
+                        self.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
+            if scale_index > 1:
+                for j in system.neighs2[i]:
+                    if i < j:
+                        self.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
+            if scale_index > 2:
+                raise NotImplementedError
         #print(exclusion_force.getNumBonds())
         #raise NotImplementedError
         #bonds_tuples = []

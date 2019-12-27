@@ -7,6 +7,7 @@ from src.test import get_test
 
 yaff.log.set_level(yaff.log.silent)
 
+
 def main(args):
     test = get_test(args)
     test()
@@ -21,13 +22,13 @@ if __name__ == '__main__':
         test: (string)
             type of test
                 'single': validates the entire potential energy and forces
-                'verlet'      : performs a short (200 steps) verlet integration run and
-                                compares energy and forces over entire trajectory
+                'verlet': performs a short (200 steps) verlet integration run and
+                          compares energy and forces over entire trajectory
         platform: (string)
             OpenMM platform to validate
-                'Reference'
-                'CPU'
-                'CUDA' (requires CUDA drivers to be installed)
+                'Reference' (most accurate)
+                'CPU' (contains optimizations for nonbonded interactions)
+                'CUDA' (fastest; requires CUDA drivers to be installed)
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('system', action='store')

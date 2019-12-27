@@ -1,12 +1,13 @@
 import yaff
 import molmod
 
+import numpy as np
 import simtk.unit as unit
 import simtk.openmm as mm
 import simtk.openmm.app
 
 from attrdict import AttrDict
-from src.utils import _align, _check_rvecs, _init_openmm_system
+from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
 from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators, apply_generators_mm
 from systems.systems import test_systems
 
@@ -86,7 +87,6 @@ class SinglePoint(Test):
 
     def _section_test(self, prefix, section):
         parameters = yaff.pes.parameters.Parameters({prefix: section})
-        mm_system = _init_openmm_system(self.system)
         ff_args = FFArgs(
                 rcut=self.rcut,
                 tr=self.tr,
@@ -104,7 +104,10 @@ class SinglePoint(Test):
                 )
         yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
-        e_ = ff.compute() / molmod.units.kjmol
+        f = np.zeros(self.system.pos.shape)
+        e_ = ff.compute(f, None) / molmod.units.kjmol
+        f *= molmod.units.nanometer / molmod.units.kjmol
+        f *= -1.0 # gpos == -force
         assert(e == e_)
         # OPENMM
         mm_system = _init_openmm_system(self.system)
@@ -127,13 +130,15 @@ class SinglePoint(Test):
                 getEnergy=True,
                 )
         mm_e = state.getPotentialEnergy()
-        return e, mm_e
+        mm_f = state.getForces(asNumpy=True)
+        return e, mm_e.value_in_unit(mm_e.unit), f, mm_f.value_in_unit(mm_f.unit)
 
     def _internal_test(self):
-        print(' ' * 11 + '\t{:20}'.format('(YAFF)') + '\t{:20}'.format('(OpenMM)'))
+        print(' ' * 11 + '\t{:20}'.format('(YAFF) kJ/mol') + '\t{:20}'.format('(OpenMM) kJ/mol') + '\t{:20}'.format('force MAE (kJ/(mol * nm))'))
         for prefix, section in self.parameters.sections.items():
-            e, mm_e = self._section_test(prefix, section)
-            print('{:10}\t{:20}\t{:20}'.format(prefix, str(e), str(mm_e)[:-6]))
+            e, mm_e, f, mm_f = self._section_test(prefix, section)
+            mae = np.mean(np.abs(f - mm_f))
+            print('{:10}\t{:20}\t{:20}\t{:20}'.format(prefix, str(e), str(mm_e), str(mae)))
         return e
 
 
@@ -141,6 +146,62 @@ class VerletTest(Test):
     """Compares energy and forces over a short trajectory obtained through Verlet integration"""
     tname = 'verlet'
 
+    @staticmethod
+    def _get_energy_forces(context):
+        """Extracts energy, forces and positions from state"""
+        state = context.getState(
+                getPositions=True,
+                getForces=True,
+                getEnergy=True,
+                )
+        mm_e = state.getPotentialEnergy()
+        mm_f = state.getForces(asNumpy=True)
+        mm_pos = state.getPositions(asNumpy=True)
+        mm_e.value_in_unit(mm_e.unit)
+        mm_f.value_in_unit(mm_f.unit)
+        mm_pos.value_in_unit(mm_pos.unit)
+        return mm_e, mm_f, mm_pos
+
+    def _simulate(self, steps):
+        """Computes a trajectory using a VerletIntegrator"""
+        energies = np.zeros(steps)
+        forces = np.zeros((steps, self.system.natom, 3))
+        positions = np.zeros((steps, self.system.natom, 3))
+
+        mm_system = _init_openmm_system(self.system)
+        ff_args = FFArgs(
+                rcut=self.rcut,
+                tr=self.tr,
+                alpha_scale=self.alpha_scale,
+                gcut_scale=self.gcut_scale,
+                )
+        apply_generators_mm(self.system, parameters, ff_args, mm_system)
+        integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
+        platform = mm.Platform.getPlatformByName(self.platform)
+        topology = get_topology(self.system)
+        simulation = mm.app.Simulation(
+                topology,
+                mm_system,
+                integrator,
+                platform,
+                )
+        simulation.context.setVelocitiesToTemperature(300 * unit.kelvin, 5)
+        simulation.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
+        simulation.reporters.append(mm.app.PDBReporter('./output.pdb', 1))
+        for i in range(steps):
+            simulation.step(1)
+            mm_e, mm_f, mm_pos = self._get_energy_forces(simulation.context)
+            energies[i] = mm_e
+            forces[i, :] = mm_f
+            positions[i, :] = mm_pos
+        return energies, forces, positions
+
+    def _yaff_compute(positions):
+        """
+
+    def _internal_test(self):
+        mm_energies, mm_forces, positions = self._simulate(10)
+        energies, forces = self._yaff_compute(positions)
 
 def get_test(args):
     """Returns the appropriate ``Test`` object"""
