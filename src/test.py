@@ -157,10 +157,10 @@ class VerletTest(Test):
         mm_e = state.getPotentialEnergy()
         mm_f = state.getForces(asNumpy=True)
         mm_pos = state.getPositions(asNumpy=True)
-        mm_e.value_in_unit(mm_e.unit)
-        mm_f.value_in_unit(mm_f.unit)
-        mm_pos.value_in_unit(mm_pos.unit)
-        return mm_e, mm_f, mm_pos
+        mm_e_ = mm_e.value_in_unit(mm_e.unit)
+        mm_f_ = mm_f.value_in_unit(mm_f.unit)
+        mm_pos_ = mm_pos.value_in_unit(mm_pos.unit)
+        return mm_e_, mm_f_, mm_pos_
 
     def _simulate(self, steps):
         """Computes a trajectory using a VerletIntegrator"""
@@ -175,7 +175,7 @@ class VerletTest(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 )
-        apply_generators_mm(self.system, parameters, ff_args, mm_system)
+        apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
         platform = mm.Platform.getPlatformByName(self.platform)
         topology = get_topology(self.system)
@@ -185,8 +185,8 @@ class VerletTest(Test):
                 integrator,
                 platform,
                 )
-        simulation.context.setVelocitiesToTemperature(300 * unit.kelvin, 5)
         simulation.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
+        simulation.context.setVelocitiesToTemperature(300 * unit.kelvin, 5)
         simulation.reporters.append(mm.app.PDBReporter('./output.pdb', 1))
         for i in range(steps):
             simulation.step(1)
@@ -196,12 +196,61 @@ class VerletTest(Test):
             positions[i, :] = mm_pos
         return energies, forces, positions
 
-    def _yaff_compute(positions):
-        """
+    def _yaff_compute(self, positions):
+        """Computes energies and forces over a trajectory using YAFF"""
+        energies = np.zeros(positions.shape[0])
+        forces = np.zeros((positions.shape[0], self.system.natom, 3))
+        ff_args = FFArgs(
+                rcut=self.rcut,
+                tr=self.tr,
+                alpha_scale=self.alpha_scale,
+                gcut_scale=self.gcut_scale,
+                )
+        apply_generators(self.system, self.parameters, ff_args)
+        ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
+        for i in range(positions.shape[0]):
+            ff.update_pos(positions[i, :] * molmod.units.nanometer)
+            energies[i] = ff.compute(forces[i], None)
+        forces *= molmod.units.nanometer / molmod.units.kjmol
+        forces *= -1.0 # gpos == -force
+        energies /= molmod.units.kjmol
+        return energies, forces
 
     def _internal_test(self):
-        mm_energies, mm_forces, positions = self._simulate(10)
+        steps = 300
+        print('simulating system for {} steps with OpenMM...'.format(steps))
+        mm_energies, mm_forces, positions = self._simulate(steps)
+        print('recomputing energies and forces wth YAFF...')
         energies, forces = self._yaff_compute(positions)
+
+        energy_ae = np.abs(energies - mm_energies)
+        energy_mae = np.mean(energy_ae)
+        energy_max_ae = np.max(energy_ae)
+        energy_median_ae = np.median(energy_ae)
+
+        forces_ae = np.abs(forces - mm_forces)
+        forces_mae = np.mean(forces_ae)
+        forces_max_ae = np.max(forces_ae)
+        forces_median_ae = np.median(forces_ae)
+
+        energy_re = np.abs((energies - mm_energies) / mm_energies)
+        energy_mre = np.mean(energy_re)
+        energy_max_re = np.max(energy_re)
+        energy_median_re = np.median(energy_re)
+
+        forces_re = np.abs((forces - mm_forces) / mm_forces)
+        forces_mre = np.mean(forces_re)
+        forces_max_re = np.max(forces_re)
+        forces_median_re = np.median(forces_re)
+
+        print('')
+        print('{:24}\t{:20}\t{:20}'.format('', 'energy [kJ/mol]', 'force [kJ/(mol * nm)]'))
+        print('{:24}\t{:20}\t{:20}'.format('mean    absolute error', str(energy_mae), str(forces_mae)))
+        print('{:24}\t{:20}\t{:20}'.format('max     absolute error', str(energy_max_ae), str(forces_max_ae)))
+        print('{:24}\t{:20}\t{:20}'.format('median  absolute error', str(energy_median_ae), str(forces_median_ae)))
+        print('{:24}\t{:20}\t{:20}'.format('mean    relative error', str(energy_mre), str(forces_mre)))
+        print('{:24}\t{:20}\t{:20}'.format('max     relative error', str(energy_max_re), str(forces_max_re)))
+        print('{:24}\t{:20}\t{:20}'.format('median  relative error', str(energy_median_re), str(forces_median_re)))
 
 def get_test(args):
     """Returns the appropriate ``Test`` object"""
