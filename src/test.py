@@ -108,6 +108,8 @@ class SinglePoint(Test):
         e_ = ff.compute(f, None) / molmod.units.kjmol
         f *= molmod.units.nanometer / molmod.units.kjmol
         f *= -1.0 # gpos == -force
+        #ff__ = yaff.ForceField.generate(self.system, parameters)
+        #e__ = ff__.compute()
         assert(e == e_)
         # OPENMM
         mm_system = _init_openmm_system(self.system)
@@ -217,7 +219,7 @@ class VerletTest(Test):
         return energies, forces
 
     def _internal_test(self):
-        steps = 300
+        steps = 10
         print('simulating system for {} steps with OpenMM...'.format(steps))
         mm_energies, mm_forces, positions = self._simulate(steps)
         print('recomputing energies and forces wth YAFF...')
@@ -251,6 +253,20 @@ class VerletTest(Test):
         print('{:24}\t{:20}\t{:20}'.format('mean    relative error', str(energy_mre), str(forces_mre)))
         print('{:24}\t{:20}\t{:20}'.format('max     relative error', str(energy_max_re), str(forces_max_re)))
         print('{:24}\t{:20}\t{:20}'.format('median  relative error', str(energy_median_re), str(forces_median_re)))
+
+        largest_e = np.argmax(energy_ae)
+        largest_f = np.argmax(np.mean(np.mean(forces_ae, axis=2), axis=1))
+        print('frame with largest energy error: {}'.format(largest_e))
+        print('frame with largest force error: {}'.format(largest_f))
+        self.save_frame(positions, largest_e, 'largest_e.chk')
+        self.save_frame(positions, largest_f, 'largest_f.chk')
+
+    def save_frame(self, positions, index, name):
+        """Saves a system file with positions[index] as pos to chk"""
+        pos = positions[index] * molmod.units.nanometer
+        self.system.pos[:] = pos
+        self.system.to_file(name)
+
 
 def get_test(args):
     """Returns the appropriate ``Test`` object"""

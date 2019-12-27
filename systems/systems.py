@@ -40,11 +40,12 @@ test_systems.append(dict(info))
 
 ## COF5 ##
 info = _create_dict(
-        supercell=[2, 1, 4],
-        rcut=10 * molmod.units.angstrom,
+        #supercell=[2, 1, 8],
+        supercell=[1, 1, 1],
+        rcut=12 * molmod.units.angstrom,
         tr=None,
         name='cof5',
         path_pars=os.path.join(PATH, 'cof5', 'pars.txt'),
-        path_chk=os.path.join(PATH, 'cof5', 'init.chk'),
+        path_chk=os.path.join(PATH, 'cof5', 'largest_e.chk'),
         )
 test_systems.append(dict(info))

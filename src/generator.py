@@ -437,6 +437,9 @@ class ValenceGenerator(Generator):
             par_list = par_table.get(key, [])
             for pars in par_list:
                 vterm = self.get_vterm(pars, indexes)
+                #if self.__class__.__name__ == 'TorsionGenerator':
+                    #print(indexes)
+                    #print(vterm.__class__.__name__)
                 part_valence.add_term(vterm)
                 self.add_term_to_force(force, pars, indexes)
 
@@ -1408,16 +1411,20 @@ class FixedChargeGenerator(NonbondedGenerator):
         assert(scale_index == 0)
 
         # COMPENSATE FOR GAUSSIAN CHARGES
-        gaussian_force = self.get_gaussian_force(alpha)
-        for i in range(system.pos.shape[0]):
-            parameters = [
-                    system.charges[i] / molmod.units.coulomb * unit.coulomb,
-                    system.radii[i] / molmod.units.nanometer * unit.nanometer,
-                    ]
-            gaussian_force.addParticle(parameters)
-        gaussian_force.setCutoffDistance(rcut)
-        gaussian_force.setNonbondedMethod(2)
-        return [force, gaussian_force]
+        if np.any(system.radii[:] !=0.0):
+            gaussian_force = self.get_gaussian_force(alpha)
+            for i in range(system.pos.shape[0]):
+                parameters = [
+                        system.charges[i] / molmod.units.coulomb * unit.coulomb,
+                        system.radii[i] / molmod.units.nanometer * unit.nanometer,
+                        ]
+                gaussian_force.addParticle(parameters)
+            gaussian_force.setCutoffDistance(rcut)
+            gaussian_force.setNonbondedMethod(2)
+            forces = [force, gaussian_force]
+        else:
+            forces = [force]
+        return forces
 
     @staticmethod
     def get_gaussian_force(ALPHA):
@@ -1547,7 +1554,6 @@ def apply_generators_mm(system, parameters, ff_args, mm_system):
 
 
 AVAILABLE_PREFIXES = []
-#print(globals())
 for x in list(globals().values()):
     if isinstance(x, type) and issubclass(x, Generator) and x.prefix is not None:
         AVAILABLE_PREFIXES.append(x.prefix)
