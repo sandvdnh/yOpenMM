@@ -16,13 +16,19 @@ class Test(object):
     """Base class to perform a test between OpenMM and YAFF"""
     tname = None
 
-    def __init__(self, name, platform, use_max_rcut=False):
+    def __init__(self, name, platform, use_max_rcut=False, largest_error=False):
         info = None
         for _ in test_systems:
             if _['name'] == name:
                 info = AttrDict(_)
         assert(info is not None)
         _ = yaff.System.from_file(info.path_chk)
+        if largest_error:
+            print('LOADING ERROR CHK')
+            _ = yaff.System.from_file(info.path_errorchk)
+            info.supercell = [1, 1, 1]
+        else:
+            self.path_errorchk = info.path_errorchk
         self.system = _.supercell(*info.supercell)
         self.parameters = yaff.Parameters.from_file(info.path_pars)
         self.platform = platform
@@ -45,6 +51,10 @@ class Test(object):
             self.gcut_scale = info.gcut_scale
         else:
             self.gcut_scale = 1.1
+        if 'reci_ei' in info:
+            self.reci_ei = info.reci_ei
+        else:
+            self.reci_ei = 'ewald'
 
     def pre(self):
         """Performs a number of checks before executing the test (to save time)
@@ -60,7 +70,7 @@ class Test(object):
         _align(self.system)
         max_rcut = _check_rvecs(self.system.cell._get_rvecs())
         if self.rcut is not None:
-            assert(self.rcut < max_rcut)
+            assert self.rcut < max_rcut, 'chosen cutoff too large: {:.3f} > {:.3f}'.format(self.rcut, max_rcut)
         else:
             self.rcut = 0.99 * max_rcut
 
@@ -92,6 +102,7 @@ class SinglePoint(Test):
                 tr=self.tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
                 )
         apply_generators(self.system, parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
@@ -101,9 +112,13 @@ class SinglePoint(Test):
                 tr=self.tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
                 )
         yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
+        #ff.compute()
+        #for part in ff.parts:
+        #    print(part.name, part.compute() / molmod.units.kjmol)
         f = np.zeros(self.system.pos.shape)
         e_ = ff.compute(f, None) / molmod.units.kjmol
         f *= molmod.units.nanometer / molmod.units.kjmol
@@ -118,13 +133,14 @@ class SinglePoint(Test):
                 tr=self.tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
                 )
         apply_generators_mm(self.system, parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
         platform = mm.Platform.getPlatformByName(self.platform)
         context = mm.Context(mm_system, integrator, platform)
         if platform.getName() == 'CUDA':
-            platform.setPropertyValue(context, "CudaPrecision", 'mixed')
+            platform.setPropertyValue(context, "CudaPrecision", 'single')
         context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
         state = context.getState(
                 getPositions=True,
@@ -141,6 +157,10 @@ class SinglePoint(Test):
             e, mm_e, f, mm_f = self._section_test(prefix, section)
             mae = np.mean(np.abs(f - mm_f))
             print('{:10}\t{:20}\t{:20}\t{:20}'.format(prefix, str(e), str(mm_e), str(mae)))
+            #if prefix == 'MM3':
+            #    err = np.abs(f - mm_f)
+            #    for i in range(err.shape[0]):
+            #        print(i, err[i])
         return e
 
 
@@ -176,6 +196,7 @@ class VerletTest(Test):
                 tr=self.tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
                 )
         apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
@@ -207,6 +228,7 @@ class VerletTest(Test):
                 tr=self.tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
                 )
         apply_generators(self.system, self.parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
@@ -219,7 +241,7 @@ class VerletTest(Test):
         return energies, forces
 
     def _internal_test(self):
-        steps = 10
+        steps = 100
         print('simulating system for {} steps with OpenMM...'.format(steps))
         mm_energies, mm_forces, positions = self._simulate(steps)
         print('recomputing energies and forces wth YAFF...')
@@ -256,16 +278,20 @@ class VerletTest(Test):
 
         largest_e = np.argmax(energy_ae)
         largest_f = np.argmax(np.mean(np.mean(forces_ae, axis=2), axis=1))
+        i = np.argmax(forces_ae)
+        index = np.unravel_index(i, forces_ae.shape)
+        ffa_id = self.system.ffatype_ids[index[-1]]
+        type_ = self.system.ffatypes[ffa_id]
         print('frame with largest energy error: {}'.format(largest_e))
-        print('frame with largest force error: {}'.format(largest_f))
-        self.save_frame(positions, largest_e, 'largest_e.chk')
-        self.save_frame(positions, largest_f, 'largest_f.chk')
+        print('index of largest force error: {}  (atom type {})'.format(index, type_))
+        self.save_frame(positions, largest_e)
 
-    def save_frame(self, positions, index, name):
+
+    def save_frame(self, positions, index):
         """Saves a system file with positions[index] as pos to chk"""
         pos = positions[index] * molmod.units.nanometer
         self.system.pos[:] = pos
-        self.system.to_file(name)
+        self.system.to_file(self.path_errorchk)
 
 
 def get_test(args):
@@ -273,8 +299,14 @@ def get_test(args):
     test_cls = None
     for cls in list(globals().values()):
         if hasattr(cls, 'tname'):
-            if args.test == cls.tname:
+            pre = 'test-'
+            name = args.mode[len(pre):]
+            if name == cls.tname:
                 test_cls = cls
     assert(test_cls is not None)
-    test = test_cls(args.system, args.platform, use_max_rcut=args.max_rcut)
+    test = test_cls(
+            args.system,
+            args.platform,
+            use_max_rcut=args.max_rcut,
+            largest_error=args.largest_error)
     return test

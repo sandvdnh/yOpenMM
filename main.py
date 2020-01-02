@@ -9,8 +9,11 @@ yaff.log.set_level(yaff.log.silent)
 
 
 def main(args):
-    test = get_test(args)
-    test()
+    if args.mode.startswith('test-'):
+        test = get_test(args)
+        test()
+    elif args.mode == 'serialize':
+        raise NotImplementedError
 
 
 if __name__ == '__main__':
@@ -19,21 +22,34 @@ if __name__ == '__main__':
     ---------
         system: (string)
             name of the test system (must be defined in ./systems/systems.py)
-        test: (string)
-            type of test
-                'single': validates the entire potential energy and forces
-                'verlet': performs a short (200 steps) verlet integration run and
+        mode: (string)
+            mode of operation
+                'test-single': validates the entire potential energy and forces
+                'test-verlet': performs a short (200 steps) verlet integration run and
                           compares energy and forces over entire trajectory
+                'serialize': save the OpenMM system object as .xml file, for later reuse.
+                'calibrate-PME': uses a plugin for OpenMM to calibrate the PME parameters for
+                    optimal overall accuracy.
         platform: (string)
             OpenMM platform to validate
                 'Reference' (most accurate)
                 'CPU' (contains optimizations for nonbonded interactions)
                 'CUDA' (fastest; requires CUDA drivers to be installed)
+
+    OPTIONAL Arguments
+    ------------------
+        --max_rcut (-r)
+            overrides the specified rcut with the maximum possible rcut, given
+            the current simulation cell
+        --largest_error (e)
+            loads the chk specified by info.path_errorchk, saved by a previous
+            verlet test.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('system', action='store')
-    parser.add_argument('test', action='store')
+    parser.add_argument('mode', action='store')
     parser.add_argument('platform', action='store')
     parser.add_argument('-r', '--max_rcut', action='store_true')
+    parser.add_argument('-e', '--largest_error', action='store_true')
     args = parser.parse_args()
     main(args)

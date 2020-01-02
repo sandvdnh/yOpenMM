@@ -1201,10 +1201,10 @@ class MM3Generator(NonbondedGenerator):
         part_pair = ForcePartPair(system, nlist, scalings, pair_pot)
         ff_args.parts.append(part_pair)
 
-        energy = 'epsilon * (1.84 * 100000 * exp(-12 * r / sigma) - 2.25 * (sigma / r)^6);'
-        energy += 'epsilon=sqrt(EPSILON1 * EPSILON2);'
-        energy += 'sigma=SIGMA1 + SIGMA2;'
-        force = mm.CustomNonbondedForce(energy)
+        energy = 'epsilon * (1.84 * 100000 * exp(-12 * r / sigma) - 2.25 * (sigma / r)^6)'
+        step = ' * step({} - r);'.format(ff_args.rcut / molmod.units.nanometer)
+        definitions = 'epsilon=sqrt(EPSILON1 * EPSILON2); sigma=SIGMA1 + SIGMA2;'
+        force = mm.CustomNonbondedForce(energy + '; ' + definitions)
         force.addPerParticleParameter('SIGMA')
         force.addPerParticleParameter('EPSILON')
         for i in range(system.pos.shape[0]):
@@ -1215,6 +1215,8 @@ class MM3Generator(NonbondedGenerator):
             force.addParticle(parameters)
         force.setCutoffDistance(ff_args.rcut / molmod.units.nanometer * unit.nanometer)
         force.setNonbondedMethod(2)
+        #force.setUseSwitchingFunction(True)
+        #force.setSwitchingDistance((ff_args.rcut - 7.558904535685008) / molmod.units.nanometer * unit.nanometer)
 
         # COMPENSATE FOR EXCLUSIONS
         scale_index = 0
@@ -1223,7 +1225,7 @@ class MM3Generator(NonbondedGenerator):
             if value == 0.0:
                 scale_index += 1
 
-        exclusion_force = self.get_exclusion_force(energy)
+        exclusion_force = self.get_exclusion_force(energy + step + '; ' + definitions)
         for i in range(system.natom):
             if scale_index > 0:
                 for j in system.neighs1[i]:
@@ -1394,8 +1396,10 @@ class FixedChargeGenerator(NonbondedGenerator):
         alpha = ff_args.alpha_scale / rcut
         force.setCutoffDistance(rcut)
         force.setNonbondedMethod(4)
+        force.setUseDispersionCorrection(False)
         delta = np.exp(-(ff_args.alpha_scale) ** 2) / 2
-        delta_thres = 1e-6
+        delta = 1e-7
+        delta_thres = 1e-8
         if delta < delta_thres:
             print('overriding error tolerance: delta = {}'.format(delta_thres))
             delta = delta_thres
@@ -1412,7 +1416,10 @@ class FixedChargeGenerator(NonbondedGenerator):
 
         # COMPENSATE FOR GAUSSIAN CHARGES
         if np.any(system.radii[:] !=0.0):
-            gaussian_force = self.get_gaussian_force(alpha)
+            gaussian_force = self.get_force(
+                    alpha,
+                    reci_ei=ff_args.reci_ei,
+                    )
             for i in range(system.pos.shape[0]):
                 parameters = [
                         system.charges[i] / molmod.units.coulomb * unit.coulomb,
@@ -1421,16 +1428,33 @@ class FixedChargeGenerator(NonbondedGenerator):
                 gaussian_force.addParticle(parameters)
             gaussian_force.setCutoffDistance(rcut)
             gaussian_force.setNonbondedMethod(2)
-            forces = [force, gaussian_force]
+            if ff_args.reci_ei == 'ignore':
+                forces = [gaussian_force]
+            elif ff_args.reci_ei == 'ewald':
+                forces = [force, gaussian_force]
+            else:
+                raise NotImplementedError
         else:
-            forces = [force]
+            if ff_args.reci_ei == 'ignore':
+                raise NotImplementedError
+            elif ff_args.reci_ei == 'ewald':
+                forces = [force]
+            else:
+                raise NotImplementedError
         return forces
 
     @staticmethod
-    def get_gaussian_force(ALPHA):
-        """Creates a force object that compensates for the gaussian charge distribution
+    def get_force(ALPHA, reci_ei='ewald'):
+        """Creates a short-ranged electrostatic force object that compensates
+        for the gaussian charge distribution.
 
-            ALPHA is the 'alpha' parameter of the gaussians used for the sum in reciprocal space.
+        Arguments
+        ---------
+            ALPHA (float):
+                the 'alpha' parameter of the gaussians used for the sum in reciprocal space.
+            reci_ei (string):
+                specifies whether the reciprocal sum is included. If it is not,
+                than no compensation is required.
         """
         #coulomb_const = 8.9875517887 * 1e9 # in units of J * m / C2
         #coulomb_const *= 1.0e9 # in units of J * nm / C2
@@ -1447,7 +1471,12 @@ class FixedChargeGenerator(NonbondedGenerator):
         definitions += "A12=1/radius1*1/radius2/sqrt(1/radius1^2 + 1/radius2^2); "
         definitions += "A1 = 1/radius1*ALPHA/sqrt(1/radius1^2 + ALPHA^2); "
         definitions += "A2 = 1/radius2*ALPHA/sqrt(1/radius2^2 + ALPHA^2); "
-        energy = E_S + " + " + E_Sg + definitions
+        if reci_ei == 'ewald':
+            energy = E_S + " + " + E_Sg + definitions
+        elif reci_ei == 'ignore':
+            energy = E_Sg + definitions
+        else:
+            raise NotImplementedError
         #energy = E_Sg + definitions
         #energy = E_S_test
         #energy += "cprod=charge1*charge2*" + str(coulomb_const) + "; "

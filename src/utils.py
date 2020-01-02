@@ -75,4 +75,9 @@ def get_topology(system):
 
 def _check_rvecs(rvecs):
     lengths = np.linalg.norm(rvecs, axis=1)
-    return np.min(lengths) / 2
+    sizes = np.array([
+        rvecs[0, 0],
+        rvecs[1, 1],
+        rvecs[2, 2],
+        ])
+    return np.min(sizes) / 2
