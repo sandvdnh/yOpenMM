@@ -4,6 +4,7 @@ import argparse
 
 from systems.systems import test_systems
 from src.test import get_test
+from src.utils import plot_switching_functions
 
 yaff.log.set_level(yaff.log.silent)
 
@@ -14,6 +15,13 @@ def main(args):
         test()
     elif args.mode == 'serialize':
         raise NotImplementedError
+    elif args.mode == 'calibrate-PME':
+        raise NotImplementedError
+    elif args.mode == 'switch-tail':
+        rcut = 13
+        rswitch = 10.5
+        width = 2.5
+        plot_switching_functions(rcut, rswitch, width)
 
 
 if __name__ == '__main__':
@@ -41,9 +49,15 @@ if __name__ == '__main__':
         --max_rcut (-r)
             overrides the specified rcut with the maximum possible rcut, given
             the current simulation cell
-        --largest_error (e)
+        --largest_error (-e)
             loads the chk specified by info.path_errorchk, saved by a previous
             verlet test.
+        --tail (-t)
+            whether or not to include tail corrections.
+        --use_switching (-s)
+            whether or not to include a switching function for dispersion interactions.
+            Since OpenMM and YAFF use different switching functions, this invalidates
+            the comparison of dispersion energies.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('system', action='store')
@@ -51,5 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('platform', action='store')
     parser.add_argument('-r', '--max_rcut', action='store_true')
     parser.add_argument('-e', '--largest_error', action='store_true')
+    parser.add_argument('-t', '--use-tail', action='store_true')
+    parser.add_argument('-s', '--use-switching', action='store_true')
     args = parser.parse_args()
     main(args)

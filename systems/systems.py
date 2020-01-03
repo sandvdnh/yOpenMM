@@ -101,3 +101,18 @@ info = _create_dict(
         path_errorchk=os.path.join(PATH, 'cau13', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
+
+
+## PPY-COF ##
+info = _create_dict(
+        supercell=[2, 2, 7],
+        rcut=5 * molmod.units.angstrom,
+        #tr=Switch3(7.558904535685008),
+        tr=None,
+        name='ppy-cof',
+        reci_ei='ewald',
+        path_pars=os.path.join(PATH, 'ppy-cof', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'ppy-cof', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'ppy-cof', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))

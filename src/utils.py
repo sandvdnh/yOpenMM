@@ -4,8 +4,14 @@ import numpy as np
 import simtk.unit as unit
 import simtk.openmm as mm
 import simtk.openmm.app
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 
 from yaff.pes.ext import Cell
+
+plt.rcParams['axes.axisbelow'] = True
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.size'] = 9
 
 def _align(system):
     """Aligns rvecs in system such that cell matrix is lower diagonal"""
@@ -81,3 +87,80 @@ def _check_rvecs(rvecs):
         rvecs[2, 2],
         ])
     return np.min(sizes) / 2
+
+def plot_switching_functions(rcut, rswitch, width):
+    """Plots the switching functions of YAFF and OpenMM
+
+    Arguments
+    ---------
+        rcut (double):
+            cutoff of nonbonded interactions
+        rswitch (double):
+            switching parameter for the OpenMM setUseSwitchingFunction member function
+        width (double):
+            argument for the YAFF Switch3 constructor.
+    """
+    sigma = 3
+    epsilon = 1
+    x = np.linspace(3 * sigma, rcut + 2, 200)
+    lj = 4 * epsilon * ((sigma / x) ** 12 - (sigma / x) ** 6)
+
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+
+    # LJ
+    ax.plot(
+            x,
+            lj,
+            color='k',
+            linewidth=1.5,
+            label='standard LJ',
+            )
+
+    # YAFF
+    lj_yaff = np.ones(lj.shape)
+    for i in range(len(x)):
+        if x[i] < rcut - width:
+            lj_yaff[i] = lj[i]
+        elif x[i] >= rcut - width and x[i] <= rcut:
+            u = (rcut - x[i]) / width
+            lj_yaff[i] = lj[i] * (3 * u ** 2 - 2 * u ** 3)
+        elif x[i] > rcut:
+            lj_yaff[i] = 0
+    ax.plot(
+            x,
+            lj_yaff,
+            color='b',
+            linewidth=1,
+            label='YAFF',
+            )
+
+    # OPENMM
+    lj_mm = np.ones(lj.shape)
+    for i in range(len(x)):
+        if x[i] < rswitch:
+            lj_mm[i] = lj[i]
+        elif x[i] >= rswitch and x[i] <= rcut:
+            u = (x[i] - rswitch) / (rcut - rswitch)
+            assert u >= 0 and u <= 1
+            lj_mm[i] = lj[i] * (1 - 6 * u ** 5 + 15 * u ** 4 - 10 * u ** 3)
+        elif x[i] > rcut:
+            lj_mm[i] = 0
+    ax.plot(
+            x,
+            lj_mm,
+            color='r',
+            linewidth=1,
+            label='OpenMM',
+            )
+
+
+    ax.set_xlabel('Distance [a.u]')
+    ax.set_ylabel('Energy [a.u]')
+    ax.grid()
+    ax.legend()
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%g'))
+    ax.xaxis.set_major_formatter(FormatStrFormatter('%g'))
+    ax.get_yaxis().set_tick_params(which='both', direction='in')
+    ax.get_xaxis().set_tick_params(which='both', direction='in')
+    fig.savefig('switch.pdf', bbox_inches='tight')
