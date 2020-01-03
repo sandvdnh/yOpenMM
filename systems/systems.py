@@ -56,3 +56,18 @@ info = _create_dict(
         path_errorchk=os.path.join(PATH, 'cof5', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
+
+
+## MOF808 ##
+info = _create_dict(
+        supercell=[3, 2, 1],
+        rcut=10 * molmod.units.angstrom,
+        #tr=Switch3(7.558904535685008),
+        tr=None,
+        name='mof808',
+        reci_ei='ewald',
+        path_pars=os.path.join(PATH, 'mof808', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'mof808', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'mof808', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))

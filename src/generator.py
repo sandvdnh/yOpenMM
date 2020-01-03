@@ -13,7 +13,7 @@ from yaff.pes.ff import ForcePartPair, ForcePartValence, \
     ForcePartEwaldNeutralizing, ForcePartTailCorrection
 from yaff.pes.iclist import Bond, BendAngle, DihedAngle, DihedCos, OopDist
 from yaff.pes.vlist import Harmonic, Cosine, Chebychev1, Chebychev2, Chebychev3, Chebychev4, Chebychev6, \
-        Cross
+        Cross, MM3Quartic, MM3Bend
 from yaff.pes.nlist import NeighborList
 from yaff.pes.scaling import Scalings
 from yaff.pes.parameters import Parameters
@@ -507,6 +507,37 @@ class BondHarmGenerator(BondGenerator):
         force.addBond(int(indexes[0]), int(indexes[1]), R0, K)
 
 
+class MM3QuarticGenerator(BondGenerator):
+    prefix = 'MM3QUART'
+    VClass = MM3Quartic
+
+    def get_force(self):
+        energy = '0.5 * K * (r - R0)^2 * (1 - CS * (r - R0) * 10 + 7/12 * (CS * (r - R0))^2 * 100);'
+        energy += ' CS = 1.349402 * {}'.format(molmod.units.angstrom)
+        force = mm.CustomBondForce(energy)
+        force.addPerBondParameter('K')
+        force.addPerBondParameter('R0')
+        force.setUsesPeriodicBoundaryConditions(True)
+        return force
+
+    def add_term_to_force(self, force, pars, indexes):
+        conversion = {
+                'K': molmod.units.kjmol / molmod.units.nanometer ** 2,
+                'R0': molmod.units.nanometer,
+                }
+        conversion_mm = {
+                'K': unit.kilojoule_per_mole / unit.nanometer ** 2,
+                'R0': unit.nanometer,
+                }
+        K = pars[0] / conversion['K'] * conversion_mm['K']
+        R0 = pars[1] / conversion['R0'] * conversion_mm['R0']
+        force.addBond(
+                int(indexes[0]),
+                int(indexes[1]),
+                [K, R0],
+                )
+
+
 class BendGenerator(ValenceGenerator):
     nffatype = 3
     ICClass = None
@@ -547,6 +578,42 @@ class BendAngleHarmGenerator(BendGenerator):
                 int(indexes[2]),
                 THETA0,
                 K,
+                )
+
+
+class MM3BendGenerator(BendGenerator):
+    nffatype = 3
+    par_info = [('K', float), ('THETA0', float)]
+    ICClass = BendAngle
+    VClass = MM3Bend
+    prefix = 'MM3BENDA'
+
+    def get_force(self):
+        #energy = '0.5*K*(theta-R0)^2*(1-0.14*(theta-R0)+5.6*10^(-5)*(theta-R0)^2-7*10^(-7)*(theta-R0)^3+2.2*10^(-8)*(theta-R0)^4); '
+        energy = '0.5*K*x^2*(1-0.014*x+5.6*10^(-5)*x^2-7*10^(-7)*x^3+2.2*10^(-8)*x^4) * {}; '.format(molmod.units.deg ** 2)
+        energy += 'x=(theta-R0) / {}'.format(molmod.units.deg)
+        force = mm.CustomAngleForce(energy)
+        force.addPerAngleParameter('K')
+        force.addPerAngleParameter('R0')
+        force.setUsesPeriodicBoundaryConditions(True)
+        return force
+
+    def add_term_to_force(self, force, pars, indexes):
+        conversion = {
+                'K': molmod.units.kjmol / molmod.units.rad ** 2,
+                'R0': molmod.units.rad,
+                }
+        conversion_mm = {
+                'K': unit.kilojoule_per_mole / unit.radians ** 2,
+                'R0': unit.radians,
+                }
+        K = pars[0] / conversion['K'] * conversion_mm['K']
+        R0 = pars[1] / conversion['R0'] * conversion_mm['R0']
+        force.addAngle(
+                int(indexes[0]),
+                int(indexes[1]),
+                int(indexes[2]),
+                [K, R0],
                 )
 
 
@@ -612,22 +679,35 @@ class OopDistGenerator(ValenceGenerator):
                 yield neighbours[0],neighbours[1],neighbours[2],atom
 
     def get_force(self):
-        d0x = '(x2 - x1)'
-        d0y = '(y2 - y1)'
-        d0z = '(z2 - z1)'
-        d1x = '(x3 - x2)'
-        d1y = '(y3 - y2)'
-        d1z = '(z3 - z2)'
-        d2x = '(x4 - x3)'
-        d2y = '(y4 - y3)'
-        d2z = '(z4 - z3)'
-        nx_ = '({} * {} - {} * {})'.format(d0y, d1z, d0z, d1y)
-        ny_ = '({} * {} - {} * {})'.format(d0z, d1x, d0x, d1z)
-        nz_ = '({} * {} - {} * {})'.format(d0x, d1y, d0y, d1x)
-        norm = 'sqrt({0}^2 + {1}^2 + {2}^2)'.format(nx_, ny_, nz_)
-        ndotd2 = '({0}*{3} + {1}*{4} + {2}*{5})'.format(nx_, ny_, nz_, d2x, d2y, d2z)
-        pre = '(1 - delta({}))'.format(norm)
-        dist = '{} * {} / {}'.format(pre, ndotd2, norm)
+        #d0x = '(x2 - x1)'
+        #d0y = '(y2 - y1)'
+        #d0z = '(z2 - z1)'
+        #d1x = '(x3 - x2)'
+        #d1y = '(y3 - y2)'
+        #d1z = '(z3 - z2)'
+        #d2x = '(x4 - x3)'
+        #d2y = '(y4 - y3)'
+        #d2z = '(z4 - z3)'
+        #nx_ = '({} * {} - {} * {})'.format(d0y, d1z, d0z, d1y)
+        #ny_ = '({} * {} - {} * {})'.format(d0z, d1x, d0x, d1z)
+        #nz_ = '({} * {} - {} * {})'.format(d0x, d1y, d0y, d1x)
+        #norm = 'sqrt({0}^2 + {1}^2 + {2}^2)'.format(nx_, ny_, nz_)
+        #ndotd2 = '({0}*{3} + {1}*{4} + {2}*{5})'.format(nx_, ny_, nz_, d2x, d2y, d2z)
+        #pre = '(1 - delta({}))'.format(norm)
+        #dist = '{} * {} / {}'.format(pre, ndotd2, norm)
+        #energy = '0.5 * K * ({} - D0)^2'.format(dist)
+
+        #base = 'distance(p1, p2) * distance(p2, p3) * cos(angle(p1, p2, p3)) / 2'
+        #a = 'distance(p1, p4)'
+        #b = 'distance(p2, p4)'
+        #c = 'distance(p3, p4)'
+        #alpha = 'angle(p2, p4, p3)'
+        #beta = 'angle(p1, p4, p3)'
+        #gamma = 'angle(p1, p4, p2)'
+        #triple_ = '{0}*{1}*{2}*sqrt(1 + 2*cos({3})*cos({4})*cos({5}) - cos({3})^2 - cos({4})^2 - cos({5})^2)'.format(a, b, c, alpha, beta, gamma)
+        #dist = '({})/(2 * ({}))'.format(triple_, base)
+
+        dist = 'distance(p2, p4) * cos(2 * atan(1.0000) - angle(p4, p2, p3)) * sin(dihedral(p1, p2, p3, p4))'
         energy = '0.5 * K * ({} - D0)^2'.format(dist)
         force = mm.CustomCompoundBondForce(4, energy)
         force.addPerBondParameter('K')
@@ -1215,8 +1295,6 @@ class MM3Generator(NonbondedGenerator):
             force.addParticle(parameters)
         force.setCutoffDistance(ff_args.rcut / molmod.units.nanometer * unit.nanometer)
         force.setNonbondedMethod(2)
-        #force.setUseSwitchingFunction(True)
-        #force.setSwitchingDistance((ff_args.rcut - 7.558904535685008) / molmod.units.nanometer * unit.nanometer)
 
         # COMPENSATE FOR EXCLUSIONS
         scale_index = 0
@@ -1237,21 +1315,6 @@ class MM3Generator(NonbondedGenerator):
                         self.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
             if scale_index > 2:
                 raise NotImplementedError
-        #print(exclusion_force.getNumBonds())
-        #raise NotImplementedError
-        #bonds_tuples = []
-        #for bond in system.bonds:
-        #    bonds_tuples.append(tuple([int(atom) for atom in bond]))
-        #scale_index = 0
-        #for key, value in scale_table.items():
-        #    assert(value == 0.0 or value == 1.0)
-        #    if value == 0.0:
-        #        scale_index += 1
-        #force.createExclusionsFromBonds(
-        #        bonds_tuples,
-        #        scale_index,
-        #        )
-        #n = force.getNumExclusions()
         return [force, exclusion_force]
 
     @staticmethod
@@ -1280,6 +1343,80 @@ class MM3Generator(NonbondedGenerator):
                 ]
         force.addBond(int(i), int(j), parameters)
 
+
+class LJGenerator(NonbondedGenerator):
+    prefix = 'LJ'
+    suffixes = ['UNIT', 'SCALE', 'PARS']
+    par_info = [('SIGMA', float), ('EPSILON', float)]
+
+    def __call__(self, system, parsec, ff_args):
+        self.check_suffixes(parsec)
+        conversions = self.process_units(parsec['UNIT'])
+        par_table = self.process_pars(parsec['PARS'], conversions, 1)
+        scale_table = self.process_scales(parsec['SCALE'])
+        self.apply(par_table, scale_table, system, ff_args)
+
+    def apply(self, par_table, scale_table, system, ff_args):
+        # Prepare the atomic parameters
+        sigmas = np.zeros(system.natom)
+        epsilons = np.zeros(system.natom)
+        for i in range(system.natom):
+            key = (system.get_ffatype(i),)
+            par_list = par_table.get(key, [])
+            if len(par_list) > 2:
+                raise TypeError('Superposition should not be allowed for non-covalent terms.')
+            elif len(par_list) == 1:
+                sigmas[i], epsilons[i] = par_list[0]
+
+        # Prepare the global parameters
+        scalings = Scalings(system, scale_table[1], scale_table[2], scale_table[3], scale_table[4])
+
+        # Get the part. It should not exist yet.
+        part_pair = ff_args.get_part_pair(PairPotLJ)
+        if part_pair is not None:
+            raise RuntimeError('Internal inconsistency: the LJ part should not be present yet.')
+
+        pair_pot = PairPotLJ(sigmas, epsilons, ff_args.rcut, ff_args.tr)
+        nlist = ff_args.get_nlist(system)
+        part_pair = ForcePartPair(system, nlist, scalings, pair_pot)
+        ff_args.parts.append(part_pair)
+
+        #energy = 'epsilon * (1.84 * 100000 * exp(-12 * r / sigma) - 2.25 * (sigma / r)^6)'
+        energy = '4.0 * epsilon * ((sigma / r)^12 - (sigma / r)^6)'
+        step = ' * step({} - r);'.format(ff_args.rcut / molmod.units.nanometer)
+        definitions = 'epsilon=sqrt(EPSILON1 * EPSILON2); sigma=SIGMA1 + SIGMA2;'
+        force = mm.CustomNonbondedForce(energy + '; ' + definitions)
+        force.addPerParticleParameter('SIGMA')
+        force.addPerParticleParameter('EPSILON')
+        for i in range(system.pos.shape[0]):
+            parameters = [
+                    sigmas[i] / molmod.nanometer * unit.nanometer,
+                    epsilons[i] / molmod.units.kjmol * unit.kilojoule_per_mole,
+                    ]
+            force.addParticle(parameters)
+        force.setCutoffDistance(ff_args.rcut / molmod.units.nanometer * unit.nanometer)
+        force.setNonbondedMethod(2)
+
+        # COMPENSATE FOR EXCLUSIONS
+        scale_index = 0
+        for key, value in scale_table.items():
+            assert(value == 0.0 or value == 1.0)
+            if value == 0.0:
+                scale_index += 1
+
+        exclusion_force = MM3Generator.get_exclusion_force(energy + step + '; ' + definitions)
+        for i in range(system.natom):
+            if scale_index > 0:
+                for j in system.neighs1[i]:
+                    if i < j:
+                        MM3Generator.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
+            if scale_index > 1:
+                for j in system.neighs2[i]:
+                    if i < j:
+                        MM3Generator.add_exclusion(sigmas, epsilons, i, j, exclusion_force)
+            if scale_index > 2:
+                raise NotImplementedError
+        return [force, exclusion_force]
 
 class FixedChargeGenerator(NonbondedGenerator):
     prefix = 'FIXQ'
@@ -1512,6 +1649,7 @@ def apply_generators(system, parameters, ff_args):
     for prefix, section in parameters.sections.items():
         generator = generators.get(prefix)
         if generator is None:
+            raise NotImplementedError
             if log.do_warning:
                 log.warn('There is no generator named %s. It will be ignored.' % prefix)
         else:
@@ -1559,7 +1697,6 @@ def apply_generators(system, parameters, ff_args):
 
 def apply_generators_mm(system, parameters, ff_args, mm_system):
     """Construct an OpenMM system object that contains the forces defined in parameters"""
-    #mm_system = _init_openmm_system(system)
     generators = {}
     for x in globals().values():
         if isinstance(x, type) and issubclass(x, Generator) and x.prefix is not None:
@@ -1571,8 +1708,7 @@ def apply_generators_mm(system, parameters, ff_args, mm_system):
     for prefix, section in parameters.sections.items():
         generator = generators.get(prefix)
         if generator is None:
-            if log.do_warning:
-                log.warn('There is no generator named %s. It will be ignored.' % prefix)
+            raise NotImplementedError
         else:
             forces = generator(system, section, ff_args)
             total_forces += forces

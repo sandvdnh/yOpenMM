@@ -66,7 +66,7 @@ class Test(object):
           cell vector
         """
         for prefix, _ in self.parameters.sections.items():
-            assert(prefix in AVAILABLE_PREFIXES)
+            assert prefix in AVAILABLE_PREFIXES, 'prefix {} not available'.format(prefix)
         _align(self.system)
         max_rcut = _check_rvecs(self.system.cell._get_rvecs())
         if self.rcut is not None:
@@ -146,9 +146,17 @@ class SinglePoint(Test):
                 getPositions=True,
                 getForces=True,
                 getEnergy=True,
+                enforcePeriodicBox=True,
                 )
+        pos = state.getPositions()
         mm_e = state.getPotentialEnergy()
         mm_f = state.getForces(asNumpy=True)
+        print('before: ', mm_e)
+        context.setPositions(pos)
+        state = context.getState(getForces=True, getEnergy=True, enforcePeriodicBox=True)
+        mm_e = state.getPotentialEnergy()
+        print('after: ', mm_e)
+        #mm_f = state.getForces(asNumpy=True)
         return e, mm_e.value_in_unit(mm_e.unit), f, mm_f.value_in_unit(mm_f.unit)
 
     def _internal_test(self):
@@ -157,7 +165,7 @@ class SinglePoint(Test):
             e, mm_e, f, mm_f = self._section_test(prefix, section)
             mae = np.mean(np.abs(f - mm_f))
             print('{:10}\t{:20}\t{:20}\t{:20}'.format(prefix, str(e), str(mm_e), str(mae)))
-            #if prefix == 'MM3':
+            #if prefix == 'OOPDIST':
             #    err = np.abs(f - mm_f)
             #    for i in range(err.shape[0]):
             #        print(i, err[i])
