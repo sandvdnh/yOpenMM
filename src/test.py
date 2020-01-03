@@ -194,7 +194,8 @@ class SinglePoint(Test):
 
     def yaff_test_virial(self, component):
         """Computes the virial based on a finite difference scheme"""
-        dh = 0.001
+        dh = 0.00001
+        _align(self.system)
 
         ff_args_ = self._get_ffargs(use_yaff=True)
         yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
@@ -230,13 +231,16 @@ class VirialTest(Test):
     fourth order approximation.
     """
     tname = 'virial'
-    dh = 0.001
+    dx = 0.0001
+    order = 2
 
     def __init__(self, *args, **kwargs):
         Test.__init__(self, *args, **kwargs)
         _align(self.system)
         self.default_pos = self.system.pos.copy()
         self.default_rvecs = self.system.cell._get_rvecs().copy()
+        gvecs = self.system.cell.gvecs
+        self.default_reduced = np.dot(self.default_pos, gvecs.transpose())
 
         # INIT YAFF
         ff_args = self._get_ffargs(use_yaff=True)
@@ -251,7 +255,7 @@ class VirialTest(Test):
         platform = mm.Platform.getPlatformByName(self.platform)
         self.context = mm.Context(mm_system, integrator, platform)
         if platform.getName() == 'CUDA':
-            platform.setPropertyValue(self.context, "CudaPrecision", 'single')
+            platform.setPropertyValue(self.context, "CudaPrecision", 'mixed')
         self.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
 
     def _set_default_pos(self):
@@ -264,7 +268,7 @@ class VirialTest(Test):
         """Computes and returns energy with YAFF given positions and rvecs"""
         self.ff.update_rvecs(rvecs)
         self.ff.update_pos(pos)
-        return self.ff.compute() / molmod.units.kjmol
+        return self.ff.compute()
 
     def _compute_mm(self, pos, rvecs):
         """Computes and returns energy with OpenMM given positions and rvecs"""
@@ -272,12 +276,98 @@ class VirialTest(Test):
         self.context.setPeriodicBoxVectors(*(rvecs / molmod.units.nanometer * unit.nanometer))
         state = self.context.getState(getEnergy=True)
         e = state.getPotentialEnergy()
-        return e.value_in_unit(e.unit)
+        return e.value_in_unit(e.unit) * molmod.units.kjmol
+
+    def _compute_dE(self, component, dx, compute_func):
+        rvecs = self.default_rvecs.copy()
+        rvecs[component] += dx
+        pos = np.dot(self.default_reduced, rvecs)
+        return compute_func(self, pos, rvecs)
+
+    def finite_difference2(self, component, compute_func):
+        """Computes a 2nd order finite difference approximation to the derivative of the energy
+
+        Arguments
+        ---------
+            component (tuple):
+                component of the cell matrix with respect to which the derivative should
+                be computed.
+            compute_func (function):
+                function used to compute the energy. It should accept three arguments
+                (self, pos, rvecs)
+        """
+        e1 = self._compute_dE(component, VirialTest.dx, compute_func)
+        e0 = self._compute_dE(component, -VirialTest.dx, compute_func)
+        return (e1 - e0) / (2 * VirialTest.dx)
+
+    def finite_difference4(self, component, compute_func):
+        """Computes a 4th order finite difference appproximation to the derivative of the energy"""
+        e2 = self._compute_dE(component, 2 * VirialTest.dx, compute_func)
+        e1 = self._compute_dE(component, VirialTest.dx, compute_func)
+        em1 = self._compute_dE(component, -VirialTest.dx, compute_func)
+        em2 = self._compute_dE(component, - 2 * VirialTest.dx, compute_func)
+        return (-e2 + 8 * e1 - 8 * em1 + em2) / (12 * VirialTest.dx)
+
+    def exact(self, component):
+        """Computes the derivative of the energy using the virial"""
+        vtens = np.zeros((3, 3))
+        self.ff.compute(gpos=None, vtens=vtens)
+        gvecs = self.ff.system.cell.gvecs
+        reduced = np.dot(self.ff.system.pos, gvecs.transpose())
+        #rvecs = np.zeros((3, 3))
+        dE = np.matmul(vtens, np.linalg.inv(self.system.cell._get_rvecs())).transpose()
+        return dE[component]
 
     def _internal_test(self):
+        c = molmod.units.kjmol
         print('TOTAL ENERGY [kJ/mol]')
-        print('(YAFF)\t\t{:10}'.format(self._compute_yaff(self.default_pos, self.default_rvecs)))
-        print('(OPENMM)\t{:10}'.format(self._compute_mm(self.default_pos, self.default_rvecs)))
+        print('(YAFF)\t\t{:10}'.format(self._compute_yaff(self.default_pos, self.default_rvecs) / c))
+        print('(OPENMM)\t{:10}'.format(self._compute_mm(self.default_pos, self.default_rvecs) / c))
+        print(15 * '-')
+
+        components = [
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (1, 0),
+                (2, 0),
+                (2, 1),
+                ]
+        dE_exact = np.zeros((3, 3))
+        dE_yaff = np.zeros((3, 3))
+        dE_mm = np.zeros((3, 3))
+        for component in components:
+            if VirialTest.order == 2:
+                print('COMPONENT {}\t{:10}\t{:10}\t{:10}'.format(component, 'YAFF (EXACT)', 'YAFF (FD2)', 'OPENMM (FD2)'))
+                fd_func = VirialTest.finite_difference2
+            elif VirialTest.order == 4:
+                print('COMPONENT {}\t{:10}\t{:10}\t{:10}'.format(component, 'YAFF (EXACT)', 'YAFF (FD4)', 'OPENMM (FD4)'))
+                fd_func = VirialTest.finite_difference4
+
+            c = molmod.units.kjmol / molmod.units.nanometer
+            fd_yaff = fd_func(self, component, VirialTest._compute_yaff)
+            fd_mm = fd_func(self, component, VirialTest._compute_mm)
+            exact = self.exact(component)
+            print('\t\t\t{:13}\t{:13}\t{:13}'.format(str(exact)[:13], str(fd_yaff)[:13], str(fd_mm)[:13]))
+            dE_exact[component] = exact
+            dE_yaff[component] = fd_yaff
+            dE_mm[component] = fd_mm
+        gvecs = np.linalg.inv(self.default_rvecs.transpose())
+        dEs = [dE_exact, dE_yaff, dE_mm]
+        virials = [np.zeros((3, 3)) for i in range(3)]
+        labels = ['YAFF (EXACT)', 'YAFF (FD)', 'OPENMM (FD)']
+        print(15 * '-')
+        print('VIRIAL CONTRIBUTION TO PRESSURE TENSOR')
+        volume = np.linalg.det(self.default_rvecs)
+        for i, dE in enumerate(dEs):
+            print(labels[i])
+            virials[i] = -1.0 / volume * np.matmul(dE, np.linalg.inv(gvecs)).transpose()
+            print(virials[i])
+        print(15 * '-')
+        print('VIRIAL CONTRIBUTION TO ISOTROPIC PRESSURE [MPa]')
+        for i in range(3):
+            c = molmod.units.pascal * 1e6
+            print('{:20}'.format(labels[i]) + str(1 / 3 * np.trace(virials[i]) / c))
 
 
 class VerletTest(Test):

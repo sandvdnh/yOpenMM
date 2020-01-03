@@ -90,8 +90,8 @@ test_systems.append(dict(info))
 
 ## CAU13 ##
 info = _create_dict(
-        supercell=[3, 4, 4],
-        rcut=15 * molmod.units.angstrom,
+        supercell=[3, 4, 3],
+        rcut=12 * molmod.units.angstrom,
         #tr=Switch3(7.558904535685008),
         tr=None,
         name='cau13',
