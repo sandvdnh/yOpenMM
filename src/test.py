@@ -16,7 +16,7 @@ class Test(object):
     """Base class to perform a test between OpenMM and YAFF"""
     tname = None
 
-    def __init__(self, name, platform, use_max_rcut=False, largest_error=False):
+    def __init__(self, name, platform, use_max_rcut=False, largest_error=False, tailcorrections=False, switching=False):
         info = None
         for _ in test_systems:
             if _['name'] == name:
@@ -55,10 +55,8 @@ class Test(object):
             self.reci_ei = info.reci_ei
         else:
             self.reci_ei = 'ewald'
-        if 'tailcorrections' in info:
-            self.tailcorrections = info.tailcorrections
-        else:
-            self.tailcorrections=False
+        self.tailcorrections = tailcorrections
+        self.switching = switching
 
     def pre(self):
         """Performs a number of checks before executing the test (to save time)
@@ -94,6 +92,28 @@ class Test(object):
         self.report()
         self._internal_test()
 
+    def _get_ffargs(self, use_yaff=True):
+        if not use_yaff:
+            return FFArgs(
+                rcut=self.rcut,
+                tr=self.tr,
+                alpha_scale=self.alpha_scale,
+                gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
+                )
+        else:
+            return yaff.pes.generator.FFArgs(
+                rcut=self.rcut,
+                tr=self.tr,
+                alpha_scale=self.alpha_scale,
+                gcut_scale=self.gcut_scale,
+                reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
+                )
+
+
+
 
 class SinglePoint(Test):
     """Compares energy and forces for a single state"""
@@ -101,25 +121,19 @@ class SinglePoint(Test):
 
     def _section_test(self, prefix, section):
         parameters = yaff.pes.parameters.Parameters({prefix: section})
-        ff_args = FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+        #ff_args = FFArgs(
+        #        rcut=self.rcut,
+        #        tr=self.tr,
+        #        alpha_scale=self.alpha_scale,
+        #        gcut_scale=self.gcut_scale,
+        #        reci_ei=self.reci_ei,
+        #        tailcorrections=self.tailcorrections,
+        #        )
+        ff_args = self._get_ffargs(use_yaff=False)
         apply_generators(self.system, parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
         e = ff.compute() / molmod.units.kjmol
-        ff_args_ = yaff.pes.generator.FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+        ff_args_ = self._get_ffargs(use_yaff=True)
         yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
         #ff.compute()
@@ -134,14 +148,7 @@ class SinglePoint(Test):
         assert(e == e_)
         # OPENMM
         mm_system = _init_openmm_system(self.system)
-        ff_args = FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+        ff_args = self._get_ffargs(use_yaff=False)
         apply_generators_mm(self.system, parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
         platform = mm.Platform.getPlatformByName(self.platform)
@@ -180,6 +187,45 @@ class SinglePoint(Test):
         return e
 
 
+    def yaff_test_virial(self, component):
+        """Computes the virial based on a finite difference scheme"""
+        dh = 0.001
+
+        ff_args_ = self._get_ffargs(use_yaff=True)
+        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
+        ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
+        vtens = np.zeros((3, 3))
+        ff.compute(gpos=None, vtens=vtens)
+        gvecs = ff.system.cell.gvecs
+        reduced = np.dot(ff.system.pos, gvecs.transpose())
+        rvecs = np.zeros((3, 3))
+        rvecs[:] = ff.system.cell._get_rvecs()
+        dE = np.matmul(vtens, np.linalg.inv(rvecs)).transpose()
+        dE = np.dot(np.linalg.inv(rvecs).transpose(), vtens)
+
+        def compute(dx):
+            rvecs_new = rvecs.copy()
+            rvecs_new[component] += dx
+            ff.update_rvecs(rvecs_new[:])
+            ff.update_pos(np.dot(reduced, rvecs_new))
+            return ff.compute()
+
+        diff = (compute(dh) - compute(-dh)) / (2 * dh)
+        print('second order: \t', diff)
+        diff = (-compute(2*dh) + 8 * compute(dh) - 8 * compute(-dh) + compute(-2 * dh)) / (12 * dh)
+        print('fourth order: \t', diff)
+        print('exact: \t\t', dE[component])
+
+
+class VirialTest(Test):
+    """Compares virial tensors between YAFF and OpenMM.
+
+    The virial tensor is computed with YAFF both analytically and using a fourth order approximation.
+    If these results correspond, then it is also computed with OpenMM using a fourth order approximation.
+    """
+    tname = 'virial'
+
+
 class VerletTest(Test):
     """Compares energy and forces over a short trajectory obtained through Verlet integration"""
     tname = 'verlet'
@@ -207,14 +253,7 @@ class VerletTest(Test):
         positions = np.zeros((steps, self.system.natom, 3))
 
         mm_system = _init_openmm_system(self.system)
-        ff_args = FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+        ff_args = self._get_ffargs(use_yaff=False)
         apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
         platform = mm.Platform.getPlatformByName(self.platform)
@@ -240,14 +279,7 @@ class VerletTest(Test):
         """Computes energies and forces over a trajectory using YAFF"""
         energies = np.zeros(positions.shape[0])
         forces = np.zeros((positions.shape[0], self.system.natom, 3))
-        ff_args = FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+        ff_args = self._get_ffargs(use_yaff=False)
         apply_generators(self.system, self.parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
         for i in range(positions.shape[0]):
@@ -326,5 +358,8 @@ def get_test(args):
             args.system,
             args.platform,
             use_max_rcut=args.max_rcut,
-            largest_error=args.largest_error)
+            largest_error=args.largest_error,
+            tailcorrections=args.use_tail,
+            switching=args.use_switching,
+            )
     return test

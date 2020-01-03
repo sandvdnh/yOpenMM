@@ -1563,7 +1563,7 @@ class FixedChargeGenerator(NonbondedGenerator):
         force.setCutoffDistance(rcut)
         force.setNonbondedMethod(4)
         delta = np.exp(-(ff_args.alpha_scale) ** 2) / 2
-        delta = 1e-7
+        delta = 1e-6
         delta_thres = 1e-8
         if delta < delta_thres:
             print('overriding error tolerance: delta = {}'.format(delta_thres))

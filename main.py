@@ -13,6 +13,7 @@ def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
         test()
+        #test.yaff_test_virial(component=(0, 0))
     elif args.mode == 'serialize':
         raise NotImplementedError
     elif args.mode == 'calibrate-PME':
@@ -65,7 +66,7 @@ if __name__ == '__main__':
     parser.add_argument('platform', action='store')
     parser.add_argument('-r', '--max_rcut', action='store_true')
     parser.add_argument('-e', '--largest_error', action='store_true')
-    parser.add_argument('-t', '--use-tail', action='store_true')
-    parser.add_argument('-s', '--use-switching', action='store_true')
+    parser.add_argument('-t', '--use_tail', action='store_true')
+    parser.add_argument('-s', '--use_switching', action='store_true')
     args = parser.parse_args()
     main(args)
