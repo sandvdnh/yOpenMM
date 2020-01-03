@@ -55,6 +55,10 @@ class Test(object):
             self.reci_ei = info.reci_ei
         else:
             self.reci_ei = 'ewald'
+        if 'tailcorrections' in info:
+            self.tailcorrections = info.tailcorrections
+        else:
+            self.tailcorrections=False
 
     def pre(self):
         """Performs a number of checks before executing the test (to save time)
@@ -103,6 +107,7 @@ class SinglePoint(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
                 )
         apply_generators(self.system, parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
@@ -113,6 +118,7 @@ class SinglePoint(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
                 )
         yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
@@ -134,6 +140,7 @@ class SinglePoint(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
                 )
         apply_generators_mm(self.system, parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
@@ -151,12 +158,13 @@ class SinglePoint(Test):
         pos = state.getPositions()
         mm_e = state.getPotentialEnergy()
         mm_f = state.getForces(asNumpy=True)
-        print('before: ', mm_e)
+        #print('before: ', mm_e)
         context.setPositions(pos)
         state = context.getState(getForces=True, getEnergy=True, enforcePeriodicBox=True)
-        mm_e = state.getPotentialEnergy()
-        print('after: ', mm_e)
-        #mm_f = state.getForces(asNumpy=True)
+        mm_e_after = state.getPotentialEnergy()
+        mm_e_ = mm_e.value_in_unit(mm_e.unit)
+        mm_e_after_ = mm_e_after.value_in_unit(mm_e_after.unit)
+        assert np.abs(mm_e_after_ - mm_e_) < 1e-4, 'energy before {} \t energy after: {}'.format(mm_e, mm_e_after)
         return e, mm_e.value_in_unit(mm_e.unit), f, mm_f.value_in_unit(mm_f.unit)
 
     def _internal_test(self):
@@ -205,6 +213,7 @@ class VerletTest(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
                 )
         apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
@@ -237,6 +246,7 @@ class VerletTest(Test):
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
+                tailcorrections=self.tailcorrections,
                 )
         apply_generators(self.system, self.parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)

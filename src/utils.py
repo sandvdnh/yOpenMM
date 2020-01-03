@@ -29,7 +29,7 @@ def _align(system):
     rotation = molmod.Rotation.from_properties(-angle, axis, False)
     rvecs_new_new = rotation * rvecs_new
     pos_new_new = rotation * pos_new
-    tol = 1e-10
+    tol = 1e-8
     assert(np.abs(rvecs_new_new[0, 1]) < tol)
     assert(np.abs(rvecs_new_new[0, 2]) < tol)
     assert(np.abs(rvecs_new_new[1, 2]) < tol)

@@ -45,7 +45,7 @@ test_systems.append(dict(info))
 
 ## COF5 ##
 info = _create_dict(
-        supercell=[3, 2, 9],
+        supercell=[3, 2, 7],
         rcut=12 * molmod.units.angstrom,
         #tr=Switch3(7.558904535685008),
         tr=None,
@@ -61,7 +61,7 @@ test_systems.append(dict(info))
 ## MOF808 ##
 info = _create_dict(
         supercell=[3, 2, 1],
-        rcut=10 * molmod.units.angstrom,
+        rcut=5 * molmod.units.angstrom,
         #tr=Switch3(7.558904535685008),
         tr=None,
         name='mof808',
@@ -69,5 +69,35 @@ info = _create_dict(
         path_pars=os.path.join(PATH, 'mof808', 'pars.txt'),
         path_chk=os.path.join(PATH, 'mof808', 'init.chk'),
         path_errorchk=os.path.join(PATH, 'mof808', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))
+
+
+## UIO66 ##
+info = _create_dict(
+        supercell=[1, 1, 1],
+        rcut=10 * molmod.units.angstrom,
+        #tr=Switch3(7.558904535685008),
+        tr=None,
+        name='uio66',
+        reci_ei='ewald',
+        path_pars=os.path.join(PATH, 'uio66', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'uio66', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'uio66', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))
+
+
+## CAU13 ##
+info = _create_dict(
+        supercell=[3, 4, 4],
+        rcut=15 * molmod.units.angstrom,
+        #tr=Switch3(7.558904535685008),
+        tr=None,
+        name='cau13',
+        reci_ei='ewald',
+        path_pars=os.path.join(PATH, 'cau13', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'cau13', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'cau13', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
