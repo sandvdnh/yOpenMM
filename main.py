@@ -13,6 +13,8 @@ def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
         test()
+        #test.pre()
+        #test.report()
         #test.yaff_test_virial(component=(0, 0))
     elif args.mode == 'serialize':
         raise NotImplementedError

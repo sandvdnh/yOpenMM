@@ -79,8 +79,16 @@ class Test(object):
     def report(self):
         print('{}; {} supercell; {} atoms'.format(self.name.upper(), self.supercell, self.system.natom))
         print('')
-        print('CUTOFF: {:.5f} angstrom'.format(self.rcut / molmod.units.angstrom))
         print(self.system.cell._get_rvecs() / molmod.units.angstrom, 'angstrom')
+        #print('CUTOFF: {:.5f} angstrom'.format(self.rcut / molmod.units.angstrom))
+        if self.switching:
+            print('CUTOFF: {:.5f} angstrom (SMOOTH, over {:.1f} angstrom)'.format(self.rcut / molmod.units.angstrom, 1))
+        else:
+            print('CUTOFF: {:.5f} angstrom (HARD)'.format(self.rcut / molmod.units.angstrom))
+        if self.tailcorrections:
+            print('USING TAIL CORRECTIONS')
+        else:
+            print('NO TAIL CORRECTIONS')
         print('')
         pass
 
@@ -111,8 +119,6 @@ class Test(object):
                 reci_ei=self.reci_ei,
                 tailcorrections=self.tailcorrections,
                 )
-
-
 
 
 class SinglePoint(Test):
@@ -186,7 +192,6 @@ class SinglePoint(Test):
             #        print(i, err[i])
         return e
 
-
     def yaff_test_virial(self, component):
         """Computes the virial based on a finite difference scheme"""
         dh = 0.001
@@ -221,9 +226,58 @@ class VirialTest(Test):
     """Compares virial tensors between YAFF and OpenMM.
 
     The virial tensor is computed with YAFF both analytically and using a fourth order approximation.
-    If these results correspond, then it is also computed with OpenMM using a fourth order approximation.
+    If these results are in correspondence, then the virial is also computed with OpenMM using a
+    fourth order approximation.
     """
     tname = 'virial'
+    dh = 0.001
+
+    def __init__(self, *args, **kwargs):
+        Test.__init__(self, *args, **kwargs)
+        _align(self.system)
+        self.default_pos = self.system.pos.copy()
+        self.default_rvecs = self.system.cell._get_rvecs().copy()
+
+        # INIT YAFF
+        ff_args = self._get_ffargs(use_yaff=True)
+        apply_generators(self.system, self.parameters, ff_args)
+        self.ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
+
+        # INIT OPENMM
+        mm_system = _init_openmm_system(self.system)
+        ff_args = self._get_ffargs(use_yaff=False)
+        apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
+        integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
+        platform = mm.Platform.getPlatformByName(self.platform)
+        self.context = mm.Context(mm_system, integrator, platform)
+        if platform.getName() == 'CUDA':
+            platform.setPropertyValue(self.context, "CudaPrecision", 'single')
+        self.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
+
+    def _set_default_pos(self):
+        self.ff.update_rvecs(self.default_rvecs)
+        self.ff.update_pos(self.default_pos)
+        self.context.setPositions(self.default_pos / molmod.units.nanometer * unit.nanometer)
+        self.context.setPeriodicBoxVectors(*(self.default_rvecs / molmod.units.nanometer * unit.nanometer))
+
+    def _compute_yaff(self, pos, rvecs):
+        """Computes and returns energy with YAFF given positions and rvecs"""
+        self.ff.update_rvecs(rvecs)
+        self.ff.update_pos(pos)
+        return self.ff.compute() / molmod.units.kjmol
+
+    def _compute_mm(self, pos, rvecs):
+        """Computes and returns energy with OpenMM given positions and rvecs"""
+        self.context.setPositions(pos[:] / molmod.units.nanometer * unit.nanometer)
+        self.context.setPeriodicBoxVectors(*(rvecs / molmod.units.nanometer * unit.nanometer))
+        state = self.context.getState(getEnergy=True)
+        e = state.getPotentialEnergy()
+        return e.value_in_unit(e.unit)
+
+    def _internal_test(self):
+        print('TOTAL ENERGY [kJ/mol]')
+        print('(YAFF)\t\t{:10}'.format(self._compute_yaff(self.default_pos, self.default_rvecs)))
+        print('(OPENMM)\t{:10}'.format(self._compute_mm(self.default_pos, self.default_rvecs)))
 
 
 class VerletTest(Test):
