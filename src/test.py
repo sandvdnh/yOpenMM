@@ -16,7 +16,7 @@ class Test(object):
     """Base class to perform a test between OpenMM and YAFF"""
     tname = None
 
-    def __init__(self, name, platform, use_max_rcut=False, largest_error=False, tailcorrections=False, switching=False):
+    def __init__(self, name, platform, use_max_rcut=False, largest_error=False):
         info = None
         for _ in test_systems:
             if _['name'] == name:
@@ -55,8 +55,14 @@ class Test(object):
             self.reci_ei = info.reci_ei
         else:
             self.reci_ei = 'ewald'
-        self.tailcorrections = tailcorrections
-        self.switching = switching
+        if 'tailcorrections' in info:
+            self.tailcorrections = info.tailcorrections
+        else:
+            self.tailcorrections = False
+        if 'tr' in info: # WIDTH OF YAFF SWITCHING FUNCTION
+            self.tr = info.tr
+        else:
+            self.tr = 7.558904535685008
 
     def pre(self):
         """Performs a number of checks before executing the test (to save time)
@@ -80,9 +86,8 @@ class Test(object):
         print('{}; {} supercell; {} atoms'.format(self.name.upper(), self.supercell, self.system.natom))
         print('')
         print(self.system.cell._get_rvecs() / molmod.units.angstrom, 'angstrom')
-        #print('CUTOFF: {:.5f} angstrom'.format(self.rcut / molmod.units.angstrom))
-        if self.switching:
-            print('CUTOFF: {:.5f} angstrom (SMOOTH, over {:.1f} angstrom)'.format(self.rcut / molmod.units.angstrom, 1))
+        if self.tr:
+            print('CUTOFF: {:.5f} angstrom (SMOOTH, over {:.3f} angstrom)'.format(self.rcut / molmod.units.angstrom, self.tr / molmod.units.angstrom))
         else:
             print('CUTOFF: {:.5f} angstrom (HARD)'.format(self.rcut / molmod.units.angstrom))
         if self.tailcorrections:
@@ -102,18 +107,15 @@ class Test(object):
 
     def _get_ffargs(self, use_yaff=True):
         if not use_yaff:
-            return FFArgs(
-                rcut=self.rcut,
-                tr=self.tr,
-                alpha_scale=self.alpha_scale,
-                gcut_scale=self.gcut_scale,
-                reci_ei=self.reci_ei,
-                tailcorrections=self.tailcorrections,
-                )
+            cls = FFArgs
         else:
-            return yaff.pes.generator.FFArgs(
+            cls = yaff.pes.generator.FFArgs
+        tr = None
+        if self.tr:
+            tr = yaff.pes.ext.Switch3(self.tr)
+        return cls(
                 rcut=self.rcut,
-                tr=self.tr,
+                tr=tr,
                 alpha_scale=self.alpha_scale,
                 gcut_scale=self.gcut_scale,
                 reci_ei=self.reci_ei,
@@ -160,7 +162,7 @@ class SinglePoint(Test):
         platform = mm.Platform.getPlatformByName(self.platform)
         context = mm.Context(mm_system, integrator, platform)
         if platform.getName() == 'CUDA':
-            platform.setPropertyValue(context, "CudaPrecision", 'single')
+            platform.setPropertyValue(context, "CudaPrecision", 'mixed')
         context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
         state = context.getState(
                 getPositions=True,
@@ -231,8 +233,8 @@ class VirialTest(Test):
     fourth order approximation.
     """
     tname = 'virial'
-    dx = 0.0001
-    order = 2
+    dx = 0.01
+    order = 4
 
     def __init__(self, *args, **kwargs):
         Test.__init__(self, *args, **kwargs)
@@ -311,6 +313,8 @@ class VirialTest(Test):
     def exact(self, component):
         """Computes the derivative of the energy using the virial"""
         vtens = np.zeros((3, 3))
+        self.ff.update_pos(self.default_pos)
+        self.ff.update_rvecs(self.default_rvecs)
         self.ff.compute(gpos=None, vtens=vtens)
         gvecs = self.ff.system.cell.gvecs
         reduced = np.dot(self.ff.system.pos, gvecs.transpose())
@@ -503,7 +507,5 @@ def get_test(args):
             args.platform,
             use_max_rcut=args.max_rcut,
             largest_error=args.largest_error,
-            tailcorrections=args.use_tail,
-            switching=args.use_switching,
             )
     return test

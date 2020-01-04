@@ -35,6 +35,8 @@ if __name__ == '__main__':
                 'test-single': validates the entire potential energy and forces
                 'test-verlet': performs a short (200 steps) verlet integration run and
                           compares energy and forces over entire trajectory
+                'test-virial': computes a numerical approximation to the virial tensor and
+                        compares with the analytical result from YAFF.
                 'serialize': save the OpenMM system object as .xml file, for later reuse.
                 'calibrate-PME': uses a plugin for OpenMM to calibrate the PME parameters for
                     optimal overall accuracy.
@@ -52,12 +54,6 @@ if __name__ == '__main__':
         --largest_error (-e)
             loads the chk specified by info.path_errorchk, saved by a previous
             verlet test.
-        --tail (-t)
-            whether or not to include tail corrections.
-        --use_switching (-s)
-            whether or not to include a switching function for dispersion interactions.
-            Since OpenMM and YAFF use different switching functions, this invalidates
-            the comparison of dispersion energies.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('system', action='store')
@@ -65,7 +61,5 @@ if __name__ == '__main__':
     parser.add_argument('platform', action='store')
     parser.add_argument('-r', '--max_rcut', action='store_true')
     parser.add_argument('-e', '--largest_error', action='store_true')
-    parser.add_argument('-t', '--use_tail', action='store_true')
-    parser.add_argument('-s', '--use_switching', action='store_true')
     args = parser.parse_args()
     main(args)

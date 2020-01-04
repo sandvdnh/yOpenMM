@@ -1324,6 +1324,16 @@ class MM3Generator(NonbondedGenerator):
         force.setCutoffDistance(ff_args.rcut / molmod.units.nanometer * unit.nanometer)
         force.setNonbondedMethod(2)
 
+        # TAIL CORRECTIONS
+        if ff_args.tailcorrections:
+            force.setUseLongRangeCorrection(True)
+
+        # SET SWITCHING IF NEEDED
+        if ff_args.tr is not None:
+            width = ff_args.tr.width
+            force.setSwitchingDistance((ff_args.rcut - width) / molmod.units.nanometer * unit.nanometer)
+            force.setUseSwitchingFunction(True)
+
         # COMPENSATE FOR EXCLUSIONS
         scale_index = 0
         for key, value in scale_table.items():
@@ -1424,7 +1434,16 @@ class LJGenerator(NonbondedGenerator):
             force.addParticle(parameters)
         force.setCutoffDistance(ff_args.rcut / molmod.units.nanometer * unit.nanometer)
         force.setNonbondedMethod(2)
-        #force.setUseLongRangeCorrection(True)
+
+        # TAIL CORRECTIONS
+        if ff_args.tailcorrections:
+            force.setUseLongRangeCorrection(True)
+
+        # SET SWITCHING IF NEEDED
+        if ff_args.tr is not None:
+            width = ff_args.tr.width
+            force.setSwitchingDistance((ff_args.rcut - width) / molmod.units.nanometer * unit.nanometer)
+            force.setUseSwitchingFunction(True)
 
         # COMPENSATE FOR EXCLUSIONS
         scale_index = 0
@@ -1563,7 +1582,7 @@ class FixedChargeGenerator(NonbondedGenerator):
         force.setCutoffDistance(rcut)
         force.setNonbondedMethod(4)
         delta = np.exp(-(ff_args.alpha_scale) ** 2) / 2
-        delta = 1e-6
+        delta = 1e-5
         delta_thres = 1e-8
         if delta < delta_thres:
             print('overriding error tolerance: delta = {}'.format(delta_thres))
@@ -1682,24 +1701,24 @@ def apply_generators(system, parameters, ff_args):
                 log.warn('There is no generator named %s. It will be ignored.' % prefix)
         else:
             generator(system, section, ff_args)
-    assert(not ff_args.tailcorrections)
+    #assert(not ff_args.tailcorrections)
     # If tail corrections are requested, go through all parts and add when necessary
-    #if ff_args.tailcorrections:
-    #    if system.cell.nvec==0:
-    #        log.warn('Tail corrections were requested, but this makes no sense for non-periodic system. Not adding tail corrections...')
-    #    elif system.cell.nvec==3:
-    #        for part in ff_args.parts:
-    #            # Only add tail correction to pair potentials
-    #            if isinstance(part,ForcePartPair):
-    #                # Don't add tail corrections to electrostatic parts whose
-    #                # long-range interactions are treated using for instance Ewald
-    #                if isinstance(part.pair_pot,PairPotEI) or isinstance(part.pair_pot,PairPotEIDip):
-    #                    continue
-    #                else:
-    #                    part_tailcorrection = ForcePartTailCorrection(system, part)
-    #                    ff_args.parts.append(part_tailcorrection)
-    #    else:
-    #        raise ValueError('Tail corrections not available for 1-D and 2-D periodic systems')
+    if ff_args.tailcorrections:
+        if system.cell.nvec==0:
+            log.warn('Tail corrections were requested, but this makes no sense for non-periodic system. Not adding tail corrections...')
+        elif system.cell.nvec==3:
+            for part in ff_args.parts:
+                # Only add tail correction to pair potentials
+                if isinstance(part,ForcePartPair):
+                    # Don't add tail corrections to electrostatic parts whose
+                    # long-range interactions are treated using for instance Ewald
+                    if isinstance(part.pair_pot,PairPotEI) or isinstance(part.pair_pot,PairPotEIDip):
+                        continue
+                    else:
+                        part_tailcorrection = ForcePartTailCorrection(system, part)
+                        ff_args.parts.append(part_tailcorrection)
+        else:
+            raise ValueError('Tail corrections not available for 1-D and 2-D periodic systems')
 
     #part_valence = ff_args.get_part(ForcePartValence)
     #if part_valence is not None and log.do_warning:
