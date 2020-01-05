@@ -102,7 +102,7 @@ def plot_switching_functions(rcut, rswitch, width):
     """
     sigma = 3
     epsilon = 1
-    x = np.linspace(3 * sigma, rcut + 2, 200)
+    x = np.linspace(rswitch, rcut, 200)
     lj = 4 * epsilon * ((sigma / x) ** 12 - (sigma / x) ** 6)
 
     fig = plt.figure(figsize=(6, 4))

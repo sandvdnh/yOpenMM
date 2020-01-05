@@ -1,5 +1,6 @@
 import yaff
 import molmod
+import time
 
 import numpy as np
 import simtk.unit as unit
@@ -61,7 +62,7 @@ class Test(object):
             self.tailcorrections = info.tailcorrections
         else:
             self.tailcorrections = False
-        if 'tr' in info: # WIDTH OF YAFF SWITCHING FUNCTION
+        if 'tr' in info:
             self.tr = info.tr
         else:
             self.tr = 7.558904535685008
@@ -99,13 +100,13 @@ class Test(object):
         print('')
         pass
 
-    def _internal_test(self):
+    def _internal_test(self, **kwargs):
         raise NotImplementedError
 
-    def __call__(self):
+    def __call__(self, **kwargs):
         self.pre()
         self.report()
-        self._internal_test()
+        self._internal_test(**kwargs)
 
     def _get_ffargs(self, use_yaff=True):
         if not use_yaff:
@@ -124,6 +125,25 @@ class Test(object):
                 tailcorrections=self.tailcorrections,
                 )
 
+    @staticmethod
+    def _add_thermostat(mm_system, T):
+        """Adds a thermostat to an OpenMM system object"""
+        thermo = mm.AndersenThermostat(T * unit.kelvin, 1/unit.picosecond)
+        mm_system.addForce(thermo)
+
+    @staticmethod
+    def _add_barostat(mm_system, T, P):
+        """Adds a barostat to an OpenMM system object"""
+        P *= unit.pascal
+        Pb = P.value_in_unit(unit.bar)
+        baro = mm.MonteCarloAnisotropicBarostat((Pb, Pb, Pb), T * unit.kelvin)
+        mm_system.addForce(baro)
+
+    @staticmethod
+    def _remove_cmmotion(mm_system):
+        cmm = mm.CMMotionRemover()
+        mm_system.addForce(cmm)
+
 
 class SinglePoint(Test):
     """Compares energy and forces for a single state"""
@@ -131,14 +151,6 @@ class SinglePoint(Test):
 
     def _section_test(self, prefix, section):
         parameters = yaff.pes.parameters.Parameters({prefix: section})
-        #ff_args = FFArgs(
-        #        rcut=self.rcut,
-        #        tr=self.tr,
-        #        alpha_scale=self.alpha_scale,
-        #        gcut_scale=self.gcut_scale,
-        #        reci_ei=self.reci_ei,
-        #        tailcorrections=self.tailcorrections,
-        #        )
         ff_args = self._get_ffargs(use_yaff=False)
         apply_generators(self.system, parameters, ff_args)
         ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
@@ -146,15 +158,10 @@ class SinglePoint(Test):
         ff_args_ = self._get_ffargs(use_yaff=True)
         yaff.pes.generator.apply_generators(self.system, parameters, ff_args_)
         ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
-        #ff.compute()
-        #for part in ff.parts:
-        #    print(part.name, part.compute() / molmod.units.kjmol)
         f = np.zeros(self.system.pos.shape)
         e_ = ff.compute(f, None) / molmod.units.kjmol
         f *= molmod.units.nanometer / molmod.units.kjmol
         f *= -1.0 # gpos == -force
-        #ff__ = yaff.ForceField.generate(self.system, parameters)
-        #e__ = ff__.compute()
         assert(e == e_)
         # OPENMM
         mm_system = _init_openmm_system(self.system)
@@ -164,7 +171,7 @@ class SinglePoint(Test):
         platform = mm.Platform.getPlatformByName(self.platform)
         context = mm.Context(mm_system, integrator, platform)
         if platform.getName() == 'CUDA':
-            platform.setPropertyValue(context, "CudaPrecision", 'mixed')
+            platform.setPropertyValue(context, "CudaPrecision", 'double')
         context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
         state = context.getState(
                 getPositions=True,
@@ -196,36 +203,6 @@ class SinglePoint(Test):
             #        print(i, err[i])
         return e
 
-    def yaff_test_virial(self, component):
-        """Computes the virial based on a finite difference scheme"""
-        dh = 0.00001
-        _align(self.system)
-
-        ff_args_ = self._get_ffargs(use_yaff=True)
-        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
-        ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
-        vtens = np.zeros((3, 3))
-        ff.compute(gpos=None, vtens=vtens)
-        gvecs = ff.system.cell.gvecs
-        reduced = np.dot(ff.system.pos, gvecs.transpose())
-        rvecs = np.zeros((3, 3))
-        rvecs[:] = ff.system.cell._get_rvecs()
-        dE = np.matmul(vtens, np.linalg.inv(rvecs)).transpose()
-        dE = np.dot(np.linalg.inv(rvecs).transpose(), vtens)
-
-        def compute(dx):
-            rvecs_new = rvecs.copy()
-            rvecs_new[component] += dx
-            ff.update_rvecs(rvecs_new[:])
-            ff.update_pos(np.dot(reduced, rvecs_new))
-            return ff.compute()
-
-        diff = (compute(dh) - compute(-dh)) / (2 * dh)
-        print('second order: \t', diff)
-        diff = (-compute(2*dh) + 8 * compute(dh) - 8 * compute(-dh) + compute(-2 * dh)) / (12 * dh)
-        print('fourth order: \t', diff)
-        print('exact: \t\t', dE[component])
-
 
 class VirialTest(Test):
     """Compares virial tensors between YAFF and OpenMM.
@@ -235,8 +212,6 @@ class VirialTest(Test):
     fourth order approximation.
     """
     tname = 'virial'
-    dx = 0.0001
-    order = 2
 
     def __init__(self, *args, **kwargs):
         Test.__init__(self, *args, **kwargs)
@@ -288,7 +263,7 @@ class VirialTest(Test):
         pos = np.dot(self.default_reduced, rvecs)
         return compute_func(self, pos, rvecs)
 
-    def finite_difference2(self, component, compute_func):
+    def finite_difference2(self, component, compute_func, dx):
         """Computes a 2nd order finite difference approximation to the derivative of the energy
 
         Arguments
@@ -300,17 +275,17 @@ class VirialTest(Test):
                 function used to compute the energy. It should accept three arguments
                 (self, pos, rvecs)
         """
-        e1 = self._compute_dE(component, VirialTest.dx, compute_func)
-        e0 = self._compute_dE(component, -VirialTest.dx, compute_func)
-        return (e1 - e0) / (2 * VirialTest.dx)
+        e1 = self._compute_dE(component, dx, compute_func)
+        e0 = self._compute_dE(component, -dx, compute_func)
+        return (e1 - e0) / (2 * dx)
 
-    def finite_difference4(self, component, compute_func):
+    def finite_difference4(self, component, compute_func, dx):
         """Computes a 4th order finite difference appproximation to the derivative of the energy"""
-        e2 = self._compute_dE(component, 2 * VirialTest.dx, compute_func)
-        e1 = self._compute_dE(component, VirialTest.dx, compute_func)
-        em1 = self._compute_dE(component, -VirialTest.dx, compute_func)
-        em2 = self._compute_dE(component, - 2 * VirialTest.dx, compute_func)
-        return (-e2 + 8 * e1 - 8 * em1 + em2) / (12 * VirialTest.dx)
+        e2 = self._compute_dE(component, 2 * dx, compute_func)
+        e1 = self._compute_dE(component, dx, compute_func)
+        em1 = self._compute_dE(component, -dx, compute_func)
+        em2 = self._compute_dE(component, - 2 * dx, compute_func)
+        return (-e2 + 8 * e1 - 8 * em1 + em2) / (12 * dx)
 
     def exact(self, component):
         """Computes the derivative of the energy using the virial"""
@@ -324,7 +299,12 @@ class VirialTest(Test):
         dE = np.matmul(vtens, np.linalg.inv(self.system.cell._get_rvecs())).transpose()
         return dE[component]
 
-    def _internal_test(self):
+    def _internal_test(self, dx=0.001, order=4):
+        print(15 * '#')
+        print('dx: {} angstrom'.format(dx))
+        print('order of FD approximation: {}'.format(order))
+        print(15 * '#')
+        print('')
         c = molmod.units.kjmol
         print('TOTAL ENERGY [kJ/mol]')
         print('(YAFF)\t\t{:10}'.format(self._compute_yaff(self.default_pos, self.default_rvecs) / c))
@@ -343,16 +323,16 @@ class VirialTest(Test):
         dE_yaff = np.zeros((3, 3))
         dE_mm = np.zeros((3, 3))
         for component in components:
-            if VirialTest.order == 2:
+            if order == 2:
                 print('COMPONENT {}\t{:10}\t{:10}\t{:10}'.format(component, 'YAFF (EXACT)', 'YAFF (FD2)', 'OPENMM (FD2)'))
                 fd_func = VirialTest.finite_difference2
-            elif VirialTest.order == 4:
+            elif order == 4:
                 print('COMPONENT {}\t{:10}\t{:10}\t{:10}'.format(component, 'YAFF (EXACT)', 'YAFF (FD4)', 'OPENMM (FD4)'))
                 fd_func = VirialTest.finite_difference4
 
             c = molmod.units.kjmol / molmod.units.nanometer
-            fd_yaff = fd_func(self, component, VirialTest._compute_yaff)
-            fd_mm = fd_func(self, component, VirialTest._compute_mm)
+            fd_yaff = fd_func(self, component, VirialTest._compute_yaff, dx)
+            fd_mm = fd_func(self, component, VirialTest._compute_mm, dx)
             exact = self.exact(component)
             print('\t\t\t{:13}\t{:13}\t{:13}'.format(str(exact)[:13], str(fd_yaff)[:13], str(fd_mm)[:13]))
             dE_exact[component] = exact
@@ -401,7 +381,6 @@ class VerletTest(Test):
         energies = np.zeros(steps)
         forces = np.zeros((steps, self.system.natom, 3))
         positions = np.zeros((steps, self.system.natom, 3))
-
         mm_system = _init_openmm_system(self.system)
         ff_args = self._get_ffargs(use_yaff=False)
         apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
@@ -440,8 +419,11 @@ class VerletTest(Test):
         energies /= molmod.units.kjmol
         return energies, forces
 
-    def _internal_test(self):
-        steps = 100
+    def _internal_test(self, steps=100):
+        print(15 * '#')
+        print('number of steps: {}'.format(steps))
+        print(15 * '#')
+        print('')
         print('simulating system for {} steps with OpenMM...'.format(steps))
         mm_energies, mm_forces, positions = self._simulate(steps)
         print('recomputing energies and forces wth YAFF...')
@@ -486,7 +468,6 @@ class VerletTest(Test):
         print('index of largest force error: {}  (atom type {})'.format(index, type_))
         self.save_frame(positions, largest_e)
 
-
     def save_frame(self, positions, index):
         """Saves a system file with positions[index] as pos to chk"""
         pos = positions[index] * molmod.units.nanometer
@@ -494,27 +475,75 @@ class VerletTest(Test):
         self.system.to_file(self.path_errorchk)
 
 
+class SimulationTest(Test):
+    """Performs a simulation using OpenMM, and outputs a .pdb file with coordinates"""
+    tname = 'simulate'
+
+    def _internal_test(self, steps=1000, writer_step=100, T=None, P=None):
+        print(15 * '#')
+        print('number of timesteps: {}'.format(steps))
+        print('writer frequency: {}'.format(writer_step))
+        print('T: {}'.format(T))
+        print('P: {}'.format(P))
+        if T is not None:
+            if P is not None:
+                print('adding temperature and pressure coupling')
+            else:
+                print('adding temperature coupling')
+        else:
+            print('no additional coupling')
+        print(15 * '#')
+        print('')
+        mm_system = _init_openmm_system(self.system)
+        ff_args = self._get_ffargs(use_yaff=False)
+        apply_generators_mm(self.system, self.parameters, ff_args, mm_system)
+        if T is not None:
+            Test._add_thermostat(mm_system, T)
+            if P is not None:
+                Test._add_barostat(mm_system, T, P)
+        integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
+        platform = mm.Platform.getPlatformByName(self.platform)
+        topology = get_topology(self.system)
+        simulation = mm.app.Simulation(
+                topology,
+                mm_system,
+                integrator,
+                platform,
+                )
+        simulation.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
+        simulation.context.setVelocitiesToTemperature(300 * unit.kelvin, 5)
+        simulation.reporters.append(mm.app.PDBReporter('./output.pdb', writer_step))
+        print('simulation in progress')
+        t0 = time.time()
+        simulation.step(steps)
+        t1 = time.time()
+        print('elapsed time:\t\t{:.3f}s'.format(t1 - t0))
+
+
 class CutoffTest(SinglePoint):
     """Sweeps the potential energy of the MM3/LJ force part"""
     tname = 'cutoff'
-    npoints = 15
-    delta = 0.1
 
     def __init__(self, *args, **kwargs):
         SinglePoint.__init__(self, *args, **kwargs)
         assert not kwargs['use_max_rcut'], 'Cannot use max_rcut option in CutoffTest'
 
-    def _internal_test(self):
+    def _internal_test(self, npoints=15, delta=0.1):
+        print(15 * '#')
+        print('number of grid points: {}'.format(npoints))
+        print('delta: {} angstrom'.format(delta))
+        print(15 * '#')
+        print('')
         prefixes = [
                 'MM3',
                 'LJ',
                 ]
-        energies = np.zeros(CutoffTest.npoints)
+        energies = np.zeros(npoints)
         energies_mm = np.zeros(energies.shape)
         forces = []
         forces_mm = []
         c = molmod.units.angstrom
-        rcuts = np.linspace(self.rcut - CutoffTest.delta * c, self.rcut + CutoffTest.delta * c, CutoffTest.npoints)
+        rcuts = np.linspace(self.rcut - delta * c, self.rcut + delta * c, npoints)
         for i in range(len(rcuts)):
             for prefix, section in self.parameters.sections.items():
                 if prefix in prefixes:
@@ -587,6 +616,14 @@ class CutoffTest(SinglePoint):
         ax.get_yaxis().set_tick_params(which='both', direction='in')
         ax.get_xaxis().set_tick_params(which='both', direction='in')
         fig.savefig('rcut.pdf', bbox_inches='tight')
+
+
+class NPTTest(Test):
+    """Validates NPT simulations"""
+    tname = 'npt'
+
+    def __init__(self, *args, **kwargs):
+        Test.__init__(self, *args, **kwargs)
 
 
 def get_test(args):

@@ -37,10 +37,10 @@ tr0 = 4.0 * molmod.units.angstrom
 
 ## MIL53 ##
 info = _create_dict(
-        supercell=[1, 2, 4],
-        rcut=9 * molmod.units.angstrom,
-        tr=None,
-        tailcorrections=False,
+        supercell=[4, 2, 7],
+        rcut=12 * molmod.units.angstrom,
+        tr=4 * molmod.units.angstrom,
+        tailcorrections=True,
         reci_ei='ewald',
         name='mil53',
         path_pars=os.path.join(PATH, 'mil53', 'pars.txt'),
@@ -52,9 +52,9 @@ test_systems.append(dict(info))
 
 ## COF5 ##
 info = _create_dict(
-        supercell=[2, 1, 7],
+        supercell=[3, 2, 6],
         rcut=10 * molmod.units.angstrom,
-        tr=None,
+        tr=4 * molmod.units.angstrom,
         tailcorrections=False,
         reci_ei='ewald',
         name='cof5',
@@ -84,8 +84,8 @@ test_systems.append(dict(info))
 info = _create_dict(
         supercell=[1, 1, 1],
         rcut=10 * molmod.units.angstrom,
-        tr=None,
-        tailcorrections=False,
+        tr=4 * molmod.units.angstrom,
+        tailcorrections=True,
         reci_ei='ewald',
         name='uio66',
         path_pars=os.path.join(PATH, 'uio66', 'pars.txt'),

@@ -12,20 +12,16 @@ yaff.log.set_level(yaff.log.silent)
 def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
-        test()
+        test(steps=300000, writer_step=1000, T=300, P=-500e6)
     elif args.mode == 'serialize':
-        raise NotImplementedError
-    elif args.mode == 'save-xyz':
         raise NotImplementedError
     elif args.mode == 'calibrate-PME':
         raise NotImplementedError
-    elif args.mode == 'scan-rcut':
-        raise NotImplementedError
     elif args.mode == 'plot-switch':
         plot_switching_functions(
-                rcut=13,
-                rswitch=10.5,
-                width=2.5,
+                rcut=10,
+                rswitch=6,
+                width=4,
                 )
     else:
         raise NotImplementedError
@@ -33,6 +29,9 @@ def main(args):
 
 if __name__ == '__main__':
     """
+    This is a suite of tests designed to validate the OpenMM implementation of YAFF system
+    and force field objects.
+
     Arguments
     ---------
         system: (string)
