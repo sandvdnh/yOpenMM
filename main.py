@@ -15,13 +15,20 @@ def main(args):
         test()
     elif args.mode == 'serialize':
         raise NotImplementedError
+    elif args.mode == 'save-xyz':
+        raise NotImplementedError
     elif args.mode == 'calibrate-PME':
         raise NotImplementedError
-    elif args.mode == 'switch-tail':
-        rcut = 13
-        rswitch = 10.5
-        width = 2.5
-        plot_switching_functions(rcut, rswitch, width)
+    elif args.mode == 'scan-rcut':
+        raise NotImplementedError
+    elif args.mode == 'plot-switch':
+        plot_switching_functions(
+                rcut=13,
+                rswitch=10.5,
+                width=2.5,
+                )
+    else:
+        raise NotImplementedError
 
 
 if __name__ == '__main__':

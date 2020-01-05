@@ -52,8 +52,8 @@ test_systems.append(dict(info))
 
 ## COF5 ##
 info = _create_dict(
-        supercell=[3, 2, 7],
-        rcut=12 * molmod.units.angstrom,
+        supercell=[2, 1, 7],
+        rcut=10 * molmod.units.angstrom,
         tr=None,
         tailcorrections=False,
         reci_ei='ewald',
@@ -67,8 +67,8 @@ test_systems.append(dict(info))
 
 ## MOF808 ##
 info = _create_dict(
-        supercell=[3, 2, 2],
-        rcut=10 * molmod.units.angstrom, ## becomes incorrect between 6.9905 and 6.9907 A
+        supercell=[3, 2, 1],
+        rcut=6.995 * molmod.units.angstrom, ## becomes incorrect between 6.9905 and 6.9907 A
         tr=None, #2 * molmod.units.angstrom,
         tailcorrections=False,
         reci_ei='ewald',

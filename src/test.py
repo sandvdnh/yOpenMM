@@ -5,6 +5,8 @@ import numpy as np
 import simtk.unit as unit
 import simtk.openmm as mm
 import simtk.openmm.app
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
@@ -233,8 +235,8 @@ class VirialTest(Test):
     fourth order approximation.
     """
     tname = 'virial'
-    dx = 0.01
-    order = 4
+    dx = 0.0001
+    order = 2
 
     def __init__(self, *args, **kwargs):
         Test.__init__(self, *args, **kwargs)
@@ -490,6 +492,101 @@ class VerletTest(Test):
         pos = positions[index] * molmod.units.nanometer
         self.system.pos[:] = pos
         self.system.to_file(self.path_errorchk)
+
+
+class CutoffTest(SinglePoint):
+    """Sweeps the potential energy of the MM3/LJ force part"""
+    tname = 'cutoff'
+    npoints = 15
+    delta = 0.1
+
+    def __init__(self, *args, **kwargs):
+        SinglePoint.__init__(self, *args, **kwargs)
+        assert not kwargs['use_max_rcut'], 'Cannot use max_rcut option in CutoffTest'
+
+    def _internal_test(self):
+        prefixes = [
+                'MM3',
+                'LJ',
+                ]
+        energies = np.zeros(CutoffTest.npoints)
+        energies_mm = np.zeros(energies.shape)
+        forces = []
+        forces_mm = []
+        c = molmod.units.angstrom
+        rcuts = np.linspace(self.rcut - CutoffTest.delta * c, self.rcut + CutoffTest.delta * c, CutoffTest.npoints)
+        for i in range(len(rcuts)):
+            for prefix, section in self.parameters.sections.items():
+                if prefix in prefixes:
+                    self.rcut = rcuts[i]
+                    e, mm_e, f, mm_f = self._section_test(prefix, section)
+                    energies[i] = e
+                    energies_mm[i] = mm_e
+                    forces.append(f.copy())
+                    forces_mm.append(mm_f.copy())
+        self.plot(rcuts, energies, energies_mm)
+        print('ENERGY DIFFERENCES [kJ/mol]')
+        print(energies_mm - energies)
+        index = np.argmax((energies_mm - energies) > 1e-1)
+        if index >= 1:
+            print('FORCE DIFFERENCE BEFORE')
+            df_before = forces[index - 1] - forces_mm[index - 1]
+            print(df_before)
+        else:
+            print('jump occurs before scanned rcut range')
+        print('FORCE DIFFERENCE AFTER')
+        df_after = forces[index] - forces_mm[index]
+        print(df_after)
+        if index >= 1:
+            ddf = df_before - df_after
+            count = 0
+            for i in range(ddf.shape[0]):
+                if np.linalg.norm(ddf[i]) > 1e-5:
+                    print('{}: {}'.format(i, ddf[i]))
+                    count += 1
+            print('TOTAL NUMBER OF ATOMS WITH LARGE FORCE DEVIATIONS: {}'.format(count))
+
+
+
+    @staticmethod
+    def plot(rcuts, energies, energies_mm):
+        fig = plt.figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+
+        # LJ
+        ax.plot(
+                rcuts / molmod.units.angstrom,
+                energies,
+                color='b',
+                linewidth=0.8,
+                linestyle='--',
+                label='YAFF',
+                marker='.',
+                markersize=10,
+                markeredgecolor='k',
+                markerfacecolor='b',
+                )
+        ax.plot(
+                rcuts / molmod.units.angstrom,
+                energies_mm,
+                color='r',
+                linewidth=0.8,
+                linestyle='--',
+                label='OpenMM',
+                marker='.',
+                markersize=10,
+                markeredgecolor='k',
+                markerfacecolor='r',
+                )
+        ax.set_xlabel('Distance [A]')
+        ax.set_ylabel('Energy [kJ/mol]')
+        ax.grid()
+        ax.legend()
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%g'))
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%g'))
+        ax.get_yaxis().set_tick_params(which='both', direction='in')
+        ax.get_xaxis().set_tick_params(which='both', direction='in')
+        fig.savefig('rcut.pdf', bbox_inches='tight')
 
 
 def get_test(args):
