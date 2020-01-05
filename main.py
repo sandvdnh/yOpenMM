@@ -12,7 +12,7 @@ yaff.log.set_level(yaff.log.silent)
 def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
-        test(steps=300000, writer_step=1000, T=300, P=-500e6)
+        test(steps=500000, writer_step=1000, T=300, P=-200e6)
     elif args.mode == 'serialize':
         raise NotImplementedError
     elif args.mode == 'calibrate-PME':

@@ -8,6 +8,7 @@ import simtk.openmm as mm
 import simtk.openmm.app
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
+from sys import stdout
 
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
@@ -143,6 +144,20 @@ class Test(object):
     def _remove_cmmotion(mm_system):
         cmm = mm.CMMotionRemover()
         mm_system.addForce(cmm)
+
+    @staticmethod
+    def _get_std_reporter(steps, writer_step):
+        sdr = mm.app.StateDataReporter(
+                stdout,
+                writer_step,
+                step=True,
+                temperature=True,
+                volume=True,
+                remainingTime=True,
+                totalSteps=steps,
+                separator='\t\t',
+                )
+        return sdr
 
 
 class SinglePoint(Test):
@@ -501,6 +516,7 @@ class SimulationTest(Test):
             Test._add_thermostat(mm_system, T)
             if P is not None:
                 Test._add_barostat(mm_system, T, P)
+        Test._remove_cmmotion(mm_system)
         integrator = mm.VerletIntegrator(0.5 * unit.femtosecond)
         platform = mm.Platform.getPlatformByName(self.platform)
         topology = get_topology(self.system)
@@ -513,6 +529,7 @@ class SimulationTest(Test):
         simulation.context.setPositions(self.system.pos / molmod.units.nanometer * unit.nanometer)
         simulation.context.setVelocitiesToTemperature(300 * unit.kelvin, 5)
         simulation.reporters.append(mm.app.PDBReporter('./output.pdb', writer_step))
+        simulation.reporters.append(Test._get_std_reporter(steps, writer_step))
         print('simulation in progress')
         t0 = time.time()
         simulation.step(steps)

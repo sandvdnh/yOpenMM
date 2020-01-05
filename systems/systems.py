@@ -37,7 +37,7 @@ tr0 = 4.0 * molmod.units.angstrom
 
 ## MIL53 ##
 info = _create_dict(
-        supercell=[4, 2, 7],
+        supercell=[2, 2, 4],
         rcut=12 * molmod.units.angstrom,
         tr=4 * molmod.units.angstrom,
         tailcorrections=True,
