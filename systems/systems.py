@@ -138,3 +138,18 @@ info = _create_dict(
         path_errorchk=os.path.join(PATH, '4pe-2p', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
+
+
+## MIL53 system for barostat ##
+info = _create_dict(
+        supercell=[1, 1, 1],
+        rcut=2 * molmod.units.angstrom,
+        tr=4 * molmod.units.angstrom,
+        tailcorrections=True,
+        reci_ei='ewald',
+        name='mil53baro',
+        path_pars=os.path.join(PATH, 'mil53', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'mil53', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'mil53', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))

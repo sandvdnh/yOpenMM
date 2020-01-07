@@ -16,6 +16,7 @@ from mdtraj.formats import HDF5TrajectoryFile
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
 from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators, apply_generators_mm
+from src.barostat import MonteCarloFullBarostat
 from systems.systems import test_systems
 
 
@@ -683,6 +684,89 @@ class ConservedTest(Test):
             ekin = np.array(list(f['kineticEnergy']))
             epot = np.array(list(f['potentialEnergy']))
             return ekin + epot
+
+
+class BaroTest(Test):
+    """Performs the shirts test on the MonteCarloFullBarostat"""
+    tname = 'baro'
+
+    def __init__(self, *args, **kwargs):
+        Test.__init__(self, *args, **kwargs)
+        self.pre()
+        print('CUT OFF MODIFIED!')
+
+    def _internal_test(self, steps=1000, writer_step=100, start=5, T=None, P=None, name='output'):
+        self.rcut = 12 * molmod.units.angstrom
+        self._test_langevin_shirts(steps, writer_step, start, T, P, name)
+
+    def _test_langevin_shirts(self, steps=1000, writer_step=100, start=5, T=None, P=None, name='output'):
+        c = molmod.units.kelvin
+        T0 = 300
+        T1 = 305
+        epot0, vol0 = self._simulate_langevin(steps, writer_step, start, T=T0, P=P, name=name)
+        epot1, vol1 = self._simulate_langevin(steps, writer_step, start, T=T1, P=P, name=name)
+        h0 = epot0 + vol0 * P
+        h1 = epot1 + vol1 * P
+        self._histogram_shirts(h0, h1)
+
+    @staticmethod
+    def _histogram_shirts(h0, h1):
+        hist0, bin_edges = np.histogram(h0) # should not contain any zeros
+        hist1, _ = np.histogram(h1, bin_edges) # may contain zeros
+        l = bin_edges[-1] - bin_edges[-2]
+        x = bin_edges[1:] - l / 2
+        # REMOVE ZEROS FROM HIST1
+        i = 0
+        print(hist0)
+        print(hist1)
+        while i < len(hist1):
+            if hist1[i] < 20:
+                hist1 = np.delete(hist1, i)
+                hist0 = np.delete(hist0, i)
+                x = np.delete(x, i)
+            else:
+                i += 1
+        y = np.log(hist0 / hist1)
+        plt.plot(x, y)
+        plt.show()
+
+    def _simulate_langevin(self, steps=1000, writer_step=100, start=1000, T=None, P=None, name='output'):
+        assert(T is not None)
+        assert(P is not None)
+        ff_args_ = self._get_ffargs(use_yaff=True)
+        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
+        ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
+        thermo = yaff.sampling.nvt.LangevinThermostat(T * molmod.units.kelvin)
+        baro = yaff.sampling.npt.LangevinBarostat(
+                ff,
+                T * molmod.units.kelvin,
+                P * molmod.units.pascal,
+                timecon=1000.0 * molmod.units.femtosecond,
+                )
+        tbc = yaff.sampling.npt.TBCombination(thermo, baro)
+        f = h5py.File(name + '.h5', 'w')
+        hdf = yaff.sampling.io.HDF5Writer(f, start=start, step=writer_step)
+        xyz = yaff.sampling.io.XYZWriter(name + '.xyz', start=start, step=writer_step)
+        vsl = yaff.sampling.verlet.VerletScreenLog(start=0, step=writer_step)
+        hooks = [
+                tbc,
+                hdf,
+                xyz,
+                vsl,
+                ]
+        verlet = yaff.sampling.verlet.VerletIntegrator(
+                ff,
+                timestep=0.5 * molmod.units.femtosecond,
+                hooks=hooks,
+                )
+        yaff.log.set_level(yaff.log.medium)
+        verlet.run(steps)
+        yaff.log.set_level(yaff.log.low)
+        ## return epot, vol
+        epot = np.array(list(f['trajectory']['epot']))
+        vol = np.array(list(f['trajectory']['volume']))
+        return epot, vol
+
 
 
 def get_test(args):

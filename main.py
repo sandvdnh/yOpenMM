@@ -12,8 +12,7 @@ yaff.log.set_level(yaff.log.silent)
 def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
-        test(steps=40000, writer_step=100)
-        #test(steps=100, writer_step=1, T=300, P=0.0)
+        test(steps=5000, writer_step=2, start=2000, T=300, P=0.0, name='shirts')
         #test(steps=14000000, writer_step=2000, T=300, P=0.0)
     elif args.mode == 'serialize':
         raise NotImplementedError
