@@ -439,7 +439,8 @@ class ValenceGenerator(Generator):
                 #if self.__class__.__name__ == 'TorsionGenerator':
                     #print(indexes)
                     #print(vterm.__class__.__name__)
-                part_valence.add_term(vterm)
+                if vterm is not None:
+                    part_valence.add_term(vterm)
                 self.add_term_to_force(force, pars, indexes)
 
     def get_vterm(self, pars, indexes):
@@ -883,6 +884,71 @@ class TorsionGenerator(ValenceGenerator):
                 [M, A, PHI0],
                 )
 
+
+class TorsionPolySixGenerator(TorsionGenerator):
+    prefix = 'TORSCPOLYSIX'
+    par_info = [
+            ('C1', float),
+            ('C2', float),
+            ('C3', float),
+            ('C4', float),
+            ('C5', float),
+            ('C6', float),
+            ]
+    ICClass = None
+    VClass = None
+
+    def get_vterm(self, pars, indexes):
+        pass
+
+    def get_force(self):
+        energy = 'C6 * cos(theta)^6 + '
+        energy += 'C5 * cos(theta)^5 + '
+        energy += 'C4 * cos(theta)^4 + '
+        energy += 'C3 * cos(theta)^3 + '
+        energy += 'C2 * cos(theta)^2 + '
+        energy += 'C1 * cos(theta)^1'
+        force = mm.CustomTorsionForce(energy)
+        force.addPerTorsionParameter('C1')
+        force.addPerTorsionParameter('C2')
+        force.addPerTorsionParameter('C3')
+        force.addPerTorsionParameter('C4')
+        force.addPerTorsionParameter('C5')
+        force.addPerTorsionParameter('C6')
+        force.setUsesPeriodicBoundaryConditions(True)
+        return force
+
+    def add_term_to_force(self, force, pars, indexes):
+        conversion = {
+                'C1': molmod.units.kjmol,
+                'C2': molmod.units.kjmol,
+                'C3': molmod.units.kjmol,
+                'C4': molmod.units.kjmol,
+                'C5': molmod.units.kjmol,
+                'C6': molmod.units.kjmol,
+                }
+        conversion_mm = {
+                'C1': unit.kilojoule_per_mole,
+                'C2': unit.kilojoule_per_mole,
+                'C3': unit.kilojoule_per_mole,
+                'C4': unit.kilojoule_per_mole,
+                'C5': unit.kilojoule_per_mole,
+                'C6': unit.kilojoule_per_mole,
+                }
+        c = conversion['C1'] * conversion_mm['C1']
+        C1 = pars[0] / c
+        C2 = pars[1] / c
+        C3 = pars[2] / c
+        C4 = pars[3] / c
+        C5 = pars[4] / c
+        C6 = pars[5] / c
+        force.addTorsion(
+                int(indexes[0]),
+                int(indexes[1]),
+                int(indexes[2]),
+                int(indexes[3]),
+                [C1, C2, C3, C4, C5, C6],
+                )
 
 class ValenceCrossGenerator(Generator):
     '''All generators for cross valence terms derive from this class.

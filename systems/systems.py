@@ -123,3 +123,18 @@ info = _create_dict(
         path_errorchk=os.path.join(PATH, 'ppy-cof', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
+
+
+## 4PE-2P ##
+info = _create_dict(
+        supercell=[2, 1, 10],
+        rcut=15 * molmod.units.angstrom,
+        tr=4 * molmod.units.angstrom,
+        tailcorrections=False,
+        reci_ei='ewald',
+        name='4pe-2p',
+        path_pars=os.path.join(PATH, '4pe-2p', 'pars.txt'),
+        path_chk=os.path.join(PATH, '4pe-2p', 'init.chk'),
+        path_errorchk=os.path.join(PATH, '4pe-2p', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))
