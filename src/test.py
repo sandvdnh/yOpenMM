@@ -16,7 +16,7 @@ from mdtraj.formats import HDF5TrajectoryFile
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
 from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators, apply_generators_mm
-from src.barostat import MonteCarloFullBarostat
+from src.barostat import MonteCarloBarostat
 from systems.systems import test_systems
 
 
@@ -695,23 +695,36 @@ class BaroTest(Test):
         self.pre()
         print('CUT OFF MODIFIED!')
 
-    def _internal_test(self, steps=1000, writer_step=100, start=5, T=None, P=None, name='output'):
+    def _internal_test(self, baro='mc', steps=1000, writer_step=100, start=5, T=None, P=None, dT=0, dP=0, name='output'):
         self.rcut = 12 * molmod.units.angstrom
-        self._test_langevin_shirts(steps, writer_step, start, T, P, name)
+        if baro == 'mc':
+            func_simulate = BaroTest._simulate_mc
+        elif baro == 'langevin':
+            func_simulate = BaroTest._simulate_langevin
+        else:
+            raise NotImplementedError
+        self.test_shirts(func_simulate, steps, writer_step, start, T, P, dT, dP, name)
 
-    def _test_langevin_shirts(self, steps=1000, writer_step=100, start=5, T=None, P=None, name='output'):
-        c = molmod.units.kelvin
-        T0 = 300
-        T1 = 305
-        epot0, vol0 = self._simulate_langevin(steps, writer_step, start, T=T0, P=P, name=name)
-        epot1, vol1 = self._simulate_langevin(steps, writer_step, start, T=T1, P=P, name=name)
-        h0 = epot0 + vol0 * P
-        h1 = epot1 + vol1 * P
-        self._histogram_shirts(h0, h1)
+    def test_shirts(self, func_simulate, steps=1000, writer_step=100, start=0, T=None, P=None, dT=0, dP=0, name='output'):
+        epot0, vol0 = func_simulate(self, steps, writer_step, start, T, P, name=name)
+        if dT != 0:
+            assert(dP == 0)
+            epot1, vol1 = func_simulate(self, steps, writer_step, start, T + dT, P, name=name)
+        elif dP != 0:
+            assert(dT == 0)
+            epot1, vol1 = func_simulate(self, steps, writer_step, start, T, P + dP, name=name)
+        else:
+            raise ValueError('Either dT or dP should be nonzero')
+        h0 = epot0 + vol0 * P * molmod.units.pascal
+        h1 = epot1 + vol1 * P * molmod.units.pascal
+        hist1, hist0 = BaroTest._create_histograms(h0, h1)
+        beta0 = 1 / (molmod.constants.boltzmann * T)
+        beta1 = 1 / (molmod.constants.boltzmann * (T + dT))
+        print('Theoretical slope: {}'.format(beta1 - beta0))
 
     @staticmethod
-    def _histogram_shirts(h0, h1):
-        hist0, bin_edges = np.histogram(h0) # should not contain any zeros
+    def _create_histograms(h0, h1):
+        hist0, bin_edges = np.histogram(h0, bins=16) # should not contain any zeros
         hist1, _ = np.histogram(h1, bin_edges) # may contain zeros
         l = bin_edges[-1] - bin_edges[-2]
         x = bin_edges[1:] - l / 2
@@ -720,7 +733,7 @@ class BaroTest(Test):
         print(hist0)
         print(hist1)
         while i < len(hist1):
-            if hist1[i] < 20:
+            if hist1[i] < 30 or hist0[i] < 30:
                 hist1 = np.delete(hist1, i)
                 hist0 = np.delete(hist0, i)
                 x = np.delete(x, i)
@@ -728,7 +741,13 @@ class BaroTest(Test):
                 i += 1
         y = np.log(hist0 / hist1)
         plt.plot(x, y)
+        print(len(y))
+        if len(y) > 5:
+            p = np.polyfit(x, y, 1)
+        plt.plot(x, p[0] * x + p[1])
+        print(p)
         plt.show()
+        return hist0, hist1
 
     def _simulate_langevin(self, steps=1000, writer_step=100, start=1000, T=None, P=None, name='output'):
         assert(T is not None)
@@ -765,8 +784,60 @@ class BaroTest(Test):
         ## return epot, vol
         epot = np.array(list(f['trajectory']['epot']))
         vol = np.array(list(f['trajectory']['volume']))
+        press = np.array(list(f['trajectory']['press']))
+        temp = np.array(list(f['trajectory']['temp']))
+        c = molmod.units.angstrom ** 3
+        print('average volume: {} A ** 3 (std: {} A ** 3)'.format(np.mean(vol) / c, np.sqrt(np.var(vol)) / c))
+        c = molmod.units.pascal * 1e6
+        print('average pressure: {} MPa (std: {} MPa)'.format(np.mean(press) / c, np.sqrt(np.var(press)) / c))
+        c = molmod.units.kelvin
+        print('average temperature: {} K (std: {} K)'.format(np.mean(temp) / c, np.sqrt(np.var(temp)) / c))
         return epot, vol
 
+    def _simulate_mc(self, steps=1000, writer_step=100, start=1000, T=None, P=None, name='output'):
+        assert(T is not None)
+        assert(P is not None)
+        ff_args_ = self._get_ffargs(use_yaff=True)
+        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args_)
+        ff = yaff.ForceField(self.system, ff_args_.parts, ff_args_.nlist)
+        thermo = yaff.sampling.nvt.LangevinThermostat(T * molmod.units.kelvin)
+        baro = MonteCarloBarostat(
+                T * molmod.units.kelvin,
+                P * molmod.units.pascal,
+                mode='full',
+                )
+        f = h5py.File(name + '.h5', 'w')
+        hdf = yaff.sampling.io.HDF5Writer(f, start=start, step=writer_step)
+        xyz = yaff.sampling.io.XYZWriter(name + '.xyz', start=start, step=writer_step)
+        vsl = yaff.sampling.verlet.VerletScreenLog(start=0, step=writer_step)
+        hooks = [
+                thermo,
+                baro,
+                hdf,
+                xyz,
+                vsl,
+                ]
+        verlet = yaff.sampling.verlet.VerletIntegrator(
+                ff,
+                timestep=0.5 * molmod.units.femtosecond,
+                hooks=hooks,
+                )
+        yaff.log.set_level(yaff.log.medium)
+        verlet.run(steps)
+        yaff.log.set_level(yaff.log.low)
+        ## return epot, vol
+        epot = np.array(list(f['trajectory']['epot']))
+        vol = np.array(list(f['trajectory']['volume']))
+        press = np.array(list(f['trajectory']['press']))
+        temp = np.array(list(f['trajectory']['temp']))
+        c = molmod.units.angstrom ** 3
+        print('average volume: {} A ** 3 (std: {} A ** 3)'.format(np.mean(vol) / c, np.sqrt(np.var(vol)) / c))
+        c = molmod.units.pascal * 1e6
+        print('average pressure: {} MPa (std: {} MPa)'.format(np.mean(press) / c, np.sqrt(np.var(press)) / c))
+        c = molmod.units.kelvin
+        print('average temperature: {} K (std: {} K)'.format(np.mean(temp) / c, np.sqrt(np.var(temp)) / c))
+        raise ValueError
+        return epot, vol
 
 
 def get_test(args):
