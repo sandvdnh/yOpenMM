@@ -4,6 +4,7 @@ import argparse
 
 from systems.systems import test_systems
 from src.test import get_test
+from src.barostat import BaroTest
 from src.utils import plot_switching_functions
 
 yaff.log.set_level(yaff.log.silent)
@@ -12,8 +13,19 @@ yaff.log.set_level(yaff.log.silent)
 def main(args):
     if args.mode.startswith('test-'):
         test = get_test(args)
-        test(baro='mc', steps=30000, writer_step=10, start=10000, T=300, P=0.0, dT=10, name='shirts')
-        #test(steps=14000, writer_step=5, T=300, P=0.0)
+        test()
+    elif args.mode == 'baro':
+        kwargs = {
+                'steps': 100000,
+                'write': 100,
+                'start': 30000,
+                'T': 300,
+                'P': 100,
+                'output_name': 'testl',
+                }
+        baro = 'langevin'
+        test = BaroTest(args.system, baro, anisotropic=True, vol_constraint=False)
+        test(**kwargs)
     elif args.mode == 'serialize':
         raise NotImplementedError
     elif args.mode == 'calibrate-PME':
@@ -44,6 +56,7 @@ if __name__ == '__main__':
                           compares energy and forces over entire trajectory
                 'test-virial': computes a numerical approximation to the virial tensor and
                         compares with the analytical result from YAFF.
+                'baro': Performs YAFF simulations with the Monte Carlo barostat in src.baro.
                 'serialize': save the OpenMM system object as .xml file, for later reuse.
                 'calibrate-PME': uses a plugin for OpenMM to calibrate the PME parameters for
                     optimal overall accuracy.

@@ -153,3 +153,18 @@ info = _create_dict(
         path_errorchk=os.path.join(PATH, 'mil53', 'largest_e.chk'),
         )
 test_systems.append(dict(info))
+
+
+## CoBDP system for barostat ##
+info = _create_dict(
+        supercell=[1, 1, 1],
+        rcut=2 * molmod.units.angstrom,
+        tr=4 * molmod.units.angstrom,
+        tailcorrections=True,
+        reci_ei='ewald',
+        name='cobdpbaro',
+        path_pars=os.path.join(PATH, 'cobdp', 'pars.txt'),
+        path_chk=os.path.join(PATH, 'cobdp', 'init.chk'),
+        path_errorchk=os.path.join(PATH, 'cobdp', 'largest_e.chk'),
+        )
+test_systems.append(dict(info))
