@@ -3,8 +3,7 @@ import yaff
 import argparse
 
 from systems.systems import test_systems
-from src.test import get_test
-from src.barostat import BaroTest
+from src.test import get_test, BaroTest
 from src.utils import plot_switching_functions
 
 yaff.log.set_level(yaff.log.silent)
@@ -16,15 +15,15 @@ def main(args):
         test()
     elif args.mode == 'baro':
         kwargs = {
-                'steps': 100000,
-                'write': 100,
-                'start': 30000,
+                'steps': 200000,
+                'write': 40,
+                'start': 50000,
                 'T': 300,
-                'P': 100,
-                'output_name': 'testl',
+                'P': -100,
+                'output_name': 'testmcnewalt',
                 }
-        baro = 'langevin'
-        test = BaroTest(args.system, baro, anisotropic=True, vol_constraint=False)
+        baro = 'mc'
+        test = BaroTest(args.system, baro, anisotropic=True, vol_constraint=True)
         test(**kwargs)
     elif args.mode == 'serialize':
         raise NotImplementedError

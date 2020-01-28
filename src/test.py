@@ -16,7 +16,7 @@ from mdtraj.formats import HDF5TrajectoryFile
 from attrdict import AttrDict
 from src.utils import _align, _check_rvecs, _init_openmm_system, get_topology
 from src.generator import AVAILABLE_PREFIXES, FFArgs, apply_generators, apply_generators_mm
-from src.barostat import MonteCarloBarostat
+from src.barostat import MonteCarloBarostat, MonteCarloBarostat2
 from systems.systems import test_systems
 
 
@@ -682,6 +682,112 @@ class ConservedTest(Test):
             ekin = np.array(list(f['kineticEnergy']))
             epot = np.array(list(f['potentialEnergy']))
             return ekin + epot
+
+
+class BaroTest(object):
+    """Evaluates a barostat based on a single MD run"""
+
+    def __init__(self, name, baro, anisotropic=True, vol_constraint=False, type_prob=(5.0 / 6)):
+        info = None
+        for _ in test_systems:
+            if _['name'] == name:
+                info = AttrDict(_)
+        assert(info is not None)
+        self.system = yaff.System.from_file(info.path_chk)
+        _align(self.system)
+        self.baro = baro
+        self.anisotropic = anisotropic
+        self.vol_constraint = vol_constraint
+        self.parameters = yaff.Parameters.from_file(info.path_pars)
+
+    @staticmethod
+    def out(f):
+        """Prints evaluation metrics
+
+        Arguments
+        ---------
+            f:
+                a readable h5py File object.
+        """
+        epot = np.array(list(f['trajectory']['epot']))
+        vol = np.array(list(f['trajectory']['volume']))
+        press = np.array(list(f['trajectory']['press']))
+        temp = np.array(list(f['trajectory']['temp']))
+        ptens = np.array(list(f['trajectory']['ptens']))
+        c = molmod.units.angstrom ** 3
+        print('average volume: {} A ** 3 (std: {} A ** 3)'.format(np.mean(vol) / c, np.sqrt(np.var(vol)) / c))
+        c = molmod.units.pascal * 1e6
+        print('average pressure: {} MPa (std: {} MPa)'.format(np.mean(press) / c, np.sqrt(np.var(press)) / c))
+        c = molmod.units.kelvin
+        print('average temperature: {} K (std: {} K)'.format(np.mean(temp) / c, np.sqrt(np.var(temp)) / c))
+        c = molmod.units.pascal * 1e6
+        print('average ptens: [MPa]')
+        print(np.mean(ptens, axis=0) / c)
+        print('average ptens std: ')
+        print(np.sqrt(np.var(ptens, axis=0)) / c)
+
+    def __call__(self, **kwargs):
+        """Performs an MD simulation and prints the results"""
+        ff_args = yaff.pes.generator.FFArgs()
+        yaff.pes.generator.apply_generators(self.system, self.parameters, ff_args)
+        ff = yaff.ForceField(self.system, ff_args.parts, ff_args.nlist)
+        f = h5py.File(kwargs['output_name'] + '.h5', 'w')
+        hdf = yaff.sampling.io.HDF5Writer(f, start=kwargs['start'], step=kwargs['write'])
+        xyz = yaff.sampling.io.XYZWriter(kwargs['output_name'] + '.xyz', start=kwargs['start'], step=kwargs['write'])
+        vsl = yaff.sampling.verlet.VerletScreenLog(start=0, step=kwargs['write'])
+        hooks = [
+                hdf,
+                xyz,
+                vsl,
+                ]
+        tbc = self._get_thermo_baro(ff, **kwargs)
+        hooks += tbc
+        verlet = yaff.sampling.verlet.VerletIntegrator(
+                ff,
+                timestep=0.5 * molmod.units.femtosecond,
+                hooks=hooks,
+                )
+        yaff.log.set_level(yaff.log.medium)
+        verlet.run(kwargs['steps'])
+        yaff.log.set_level(yaff.log.low)
+        self.out(f)
+
+    def _get_thermo_baro(self, ff, **kwargs):
+        T = kwargs['T'] * molmod.units.kelvin
+        P = kwargs['P'] * molmod.units.pascal * 1e6
+        if self.baro == 'langevin':
+            thermo = yaff.sampling.nvt.LangevinThermostat(T)
+            baro = yaff.sampling.npt.LangevinBarostat(
+                    ff,
+                    T,
+                    P,
+                    timecon=1000.0 * molmod.units.femtosecond,
+                    anisotropic=self.anisotropic,
+                    vol_constraint=self.vol_constraint,
+                    )
+            return [yaff.sampling.npt.TBCombination(thermo, baro)]
+        elif self.baro == 'mc':
+            if self.anisotropic and not self.vol_constraint:
+                mode = 'full'
+            elif not self.anisotropic and not self.vol_constraint:
+                mode = 'isotropic'
+            elif self.anisotropic and self.vol_constraint:
+                mode = 'constrained'
+            else:
+                raise NotImplementedError
+            thermo = yaff.sampling.nvt.LangevinThermostat(T)
+            baro = MonteCarloBarostat2(
+                    T,
+                    P,
+                    mode=mode,
+                    )
+            return [thermo, baro]
+        elif self.baro == 'mtk':
+            thermo = yaff.sampling.nvt.NHCThermostat(T, timecon=100.0 * molmod.units.femtosecond, chainlength=3) #thermostat
+            baro = yaff.sampling.npt.MTKBarostat(ff, T, P, timecon=1000.0 * molmod.units.femtosecond, vol_constraint=self.vol_constraint, anisotropic=self.anisotropic)
+            return [yaff.sampling.npt.TBCombination(thermo, baro)]
+        else:
+            raise NotImplementedError
 
 
 def get_test(args):
